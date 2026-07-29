@@ -1,8 +1,12 @@
 import dotenv from 'dotenv';
+import { z } from 'zod';
+
 dotenv.config();
 
-export const env = {
-    NODE_ENV: process.env.NODE_ENV ?? 'development',
-    PORT: Number(process.env.PORT) ?? 6060,
-    MONGODB_URI: process.env.MONGODB_URI!,
-} as const;
+const envSchema = z.object({
+    NODE_ENV: z.enum(['development', 'production']).default('development'),
+    PORT: z.coerce.number().int().positive().default(6060),
+    MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
+});
+
+export const env = envSchema.parse(process.env);

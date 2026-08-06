@@ -97,3 +97,28 @@ export const validateInvoice = async (payload: InvoiceSubmissionPayload): Promis
 export const createFullInvoice = async (payload: InvoiceSubmissionPayload): Promise<AigentrixResult> => {
     return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/createFull"), payload);
 };
+
+export const getInvoiceEntry = async (entryId: number): Promise<AigentrixResult> => {
+    const response = await fetch(buildUrl(`/external/api/v1/eInvoiceEntry/${entryId}`), {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+            "X-API-KEY": env.AIGENTRIX_API_KEY,
+        },
+    });
+
+    const responseText = await response.text();
+    const data = parseResponse(responseText);
+
+    if (!response.ok) {
+        return {
+            success: false,
+            error: data,
+        };
+    }
+
+    return {
+        success: true,
+        data,
+    };
+};

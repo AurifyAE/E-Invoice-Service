@@ -7,6 +7,7 @@ export interface InvoiceSubmissionDocument extends mongoose.Document {
     companyId: string;
     invoiceRef?: string;
     documentId: string;
+    entryId?: number;
     payload: InvoiceSubmissionPayload;
     status: InvoiceSubmissionStatus;
     provider: "aigentrix";
@@ -77,6 +78,7 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
         companyId: { type: String, required: true, index: true },
         invoiceRef: { type: String },
         documentId: { type: String, required: true, index: true },
+        entryId: { type: Number, index: true },
         payload: { type: invoicePayloadSchema, required: true },
         status: {
             type: String,

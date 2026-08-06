@@ -4,7 +4,7 @@ import { env } from "../../config/env.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
-import { createFullInvoice, validateInvoice } from "../aigentrix/aigentrix.service.js";
+import { createFullInvoice, getInvoiceEntry as getAigentrixInvoiceEntry, validateInvoice } from "../aigentrix/aigentrix.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -90,6 +90,59 @@ const submitToProvider = async (payload: InvoiceSubmissionPayload) => {
     }
 };
 
+const extractEntryId = (providerResponse: unknown): number | undefined => {
+    if (typeof providerResponse !== "object" || providerResponse === null) {
+        return undefined;
+    }
+
+    const visited = new WeakSet<object>();
+
+    const findEntryId = (value: unknown): number | undefined => {
+        if (typeof value !== "object" || value === null) {
+            return undefined;
+        }
+
+        if (visited.has(value)) {
+            return undefined;
+        }
+
+        visited.add(value);
+
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const entryId = findEntryId(item);
+                if (entryId) {
+                    return entryId;
+                }
+            }
+
+            return undefined;
+        }
+
+        const record = value as Record<string, unknown>;
+
+        if (typeof record.entryId === "string" && record.entryId.trim()) {
+            const entryId = Number(record.entryId);
+            return Number.isNaN(entryId) ? undefined : entryId;
+        }
+
+        if (typeof record.entryId === "number") {
+            return record.entryId;
+        }
+
+        for (const nestedValue of Object.values(record)) {
+            const entryId = findEntryId(nestedValue);
+            if (entryId) {
+                return entryId;
+            }
+        }
+
+        return undefined;
+    };
+
+    return findEntryId(providerResponse);
+};
+
 const buildInvoicePayload = (payload: unknown) => {
     return {
         ...(typeof payload === "object" && payload !== null ? payload : {}),
@@ -140,19 +193,21 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
         const providerResult = await submitToProvider(parsedPayload);
 
         submission.status = providerResult.success ? "SUBMITTED" : "FAILED";
+        submission.entryId = providerResult.success ? extractEntryId(providerResult.data) : undefined;
         submission.providerResponse = providerResult.data;
         submission.providerError = providerResult.error;
 
         await submission.save();
 
         return {
-            statusCode: providerResult.success ? 201 : 422,
+            statusCode: providerResult.success ? 200 : 422,
             body: {
                 success: providerResult.success,
                 data: {
                     submissionId: submission.id,
                     companyId: submission.companyId,
                     documentId: submission.documentId,
+                    entryId: submission.entryId,
                     invoiceRef: submission.invoiceRef,
                     status: submission.status,
                     provider: submission.provider,
@@ -210,6 +265,59 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
                 error: {
                     code: "INTERNAL_SERVER_ERROR",
                     message: "Failed to submit invoice",
+                },
+            },
+        };
+    }
+};
+
+export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse> => {
+    const parsedEntryId = Number(entryId);
+
+    if (!entryId || Number.isNaN(parsedEntryId) || parsedEntryId <= 0) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "INVALID_ENTRY_ID",
+                    message: "Valid entryId is required",
+                },
+            },
+        };
+    }
+
+    try {
+        const result = await getAigentrixInvoiceEntry(parsedEntryId);
+
+        if (!result.success) {
+            return {
+                statusCode: 422,
+                body: {
+                    success: false,
+                    error: {
+                        code: "AIGENTRIX_ENTRY_FETCH_FAILED",
+                        message: "Failed to fetch invoice entry from Aigentrix",
+                        details: result.error,
+                    },
+                },
+            };
+        }
+
+        return {
+            statusCode: 200,
+            body: typeof result.data === "object" && result.data !== null
+                ? result.data as Record<string, unknown>
+                : { data: result.data },
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: {
+                success: false,
+                error: {
+                    code: "AIGENTRIX_ENTRY_FETCH_FAILED",
+                    message: error instanceof Error ? error.message : "Failed to fetch invoice entry from Aigentrix",
                 },
             },
         };

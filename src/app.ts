@@ -6,6 +6,7 @@ import { requestLogger } from './middleware/request-logger.js';
 import routes from './routes/index.js';
 
 const app = express();
+const corsOrigins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim().replace(/\/$/, ''));
 
 app.disable('x-powered-by');
 app.use(helmet({
@@ -18,7 +19,7 @@ app.use(helmet({
     },
 }));
 app.use(cors({
-    origin: env.CORS_ORIGIN,
+    origin: corsOrigins,
 }));
 app.use(requestLogger);
 app.use(express.json());

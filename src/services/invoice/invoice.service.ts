@@ -144,10 +144,20 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
 };
 
 const buildInvoicePayload = (payload: unknown) => {
+    const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
+    const invoiceDirection = typeof rawPayload.invoiceTransactionType === "string" && rawPayload.invoiceTransactionType.trim()
+        ? rawPayload.invoiceTransactionType
+        : "Sale";
+    const isPurchase = invoiceDirection.trim().toLowerCase() === "purchase";
+
     return {
-        ...(typeof payload === "object" && payload !== null ? payload : {}),
+        ...rawPayload,
+        invoiceSubmissionType: isPurchase ? "purchase" : "sale",
         companyId: String(env.AIGENTRIX_COMPANY_ID),
+        supplierParticipantId: String(isPurchase ? env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID : env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID),
+        customerParticipantId: String(isPurchase ? env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID : env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
         invoiceTypeCode: String(env.AIGENTRIX_INVOICE_TYPE_CODE),
+        status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
         payments: [{ paymentMeansCode: "30" }],
     };

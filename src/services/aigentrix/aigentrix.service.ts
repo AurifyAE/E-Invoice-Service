@@ -52,6 +52,7 @@ const postToAigentrix = async (
         ...payload,
         companyId: env.AIGENTRIX_COMPANY_ID,
         invoiceTypeCode: env.AIGENTRIX_INVOICE_TYPE_CODE,
+        status: env.AIGENTRIX_INVOICE_STATUS,
         invoiceTransactionType: 0,
         payments: [{ paymentMeansCode: "30" }]
     };

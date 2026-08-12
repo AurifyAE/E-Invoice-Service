@@ -26,6 +26,80 @@ export const paymentSchema = z.object({
     paymentMeansCode: z.string().min(1, "paymentMeansCode is required"),
 });
 
+const invoiceSubmissionTypes = ["sale", "sales", "purchase"] as const;
+
+const getStringValue = (record: Record<string, unknown>, key: string): string | undefined => {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+};
+
+const resolveInvoiceSubmissionType = (invoice: Record<string, unknown>): "sale" | "purchase" => {
+    const rawType = getStringValue(invoice, "invoiceSubmissionType")
+        ?? getStringValue(invoice, "invoiceTransactionType")
+        ?? getStringValue(invoice, "invoiceDirection")
+        ?? getStringValue(invoice, "transactionType")
+        ?? "sale";
+
+    return rawType.trim().toLowerCase() === "purchase" ? "purchase" : "sale";
+};
+
+const getNestedRecord = (record: Record<string, unknown>, key: string): Record<string, unknown> | undefined => {
+    const value = record[key];
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined;
+};
+
+const getSourceFieldValue = (
+    invoice: Record<string, unknown>,
+    sourcePrefix: "organization" | "party",
+    sourceKey: string,
+): unknown => {
+    const flatValue = invoice[`${sourcePrefix}${sourceKey}`];
+
+    if (flatValue !== undefined) {
+        return flatValue;
+    }
+
+    const nestedSource = getNestedRecord(invoice, sourcePrefix);
+    const nestedKey = `${sourceKey.charAt(0).toLowerCase()}${sourceKey.slice(1)}`;
+
+    return nestedSource?.[nestedKey];
+};
+
+const getMappedPartyFieldValue = (
+    invoice: Record<string, unknown>,
+    directKey: string,
+    sourcePrefix: "organization" | "party",
+    sourceKey: string,
+) => {
+    return getSourceFieldValue(invoice, sourcePrefix, sourceKey) ?? invoice[directKey];
+};
+
+const buildSellerBuyerPayload = (invoice: Record<string, unknown>) => {
+    const invoiceSubmissionType = resolveInvoiceSubmissionType(invoice);
+    const sellerSourcePrefix = invoiceSubmissionType === "purchase" ? "party" : "organization";
+    const buyerSourcePrefix = invoiceSubmissionType === "purchase" ? "organization" : "party";
+
+    return {
+        invoiceSubmissionType,
+        sellerName: getMappedPartyFieldValue(invoice, "sellerName", sellerSourcePrefix, "Name"),
+        sellerVatTrn: getMappedPartyFieldValue(invoice, "sellerVatTrn", sellerSourcePrefix, "VatTrn"),
+        sellerRegisteredName: getMappedPartyFieldValue(invoice, "sellerRegisteredName", sellerSourcePrefix, "RegisteredName"),
+        sellerAddressLine1: getMappedPartyFieldValue(invoice, "sellerAddressLine1", sellerSourcePrefix, "AddressLine1"),
+        sellerCity: getMappedPartyFieldValue(invoice, "sellerCity", sellerSourcePrefix, "City"),
+        sellerCountrySubdivision: getMappedPartyFieldValue(invoice, "sellerCountrySubdivision", sellerSourcePrefix, "CountrySubdivision"),
+        sellerCountryCode: getMappedPartyFieldValue(invoice, "sellerCountryCode", sellerSourcePrefix, "CountryCode"),
+        buyerName: getMappedPartyFieldValue(invoice, "buyerName", buyerSourcePrefix, "Name"),
+        buyerVatTrn: getMappedPartyFieldValue(invoice, "buyerVatTrn", buyerSourcePrefix, "VatTrn"),
+        buyerRegisteredName: getMappedPartyFieldValue(invoice, "buyerRegisteredName", buyerSourcePrefix, "RegisteredName"),
+        buyerAddressLine1: getMappedPartyFieldValue(invoice, "buyerAddressLine1", buyerSourcePrefix, "AddressLine1"),
+        buyerCity: getMappedPartyFieldValue(invoice, "buyerCity", buyerSourcePrefix, "City"),
+        buyerCountrySubdivision: getMappedPartyFieldValue(invoice, "buyerCountrySubdivision", buyerSourcePrefix, "CountrySubdivision"),
+        buyerCountryCode: getMappedPartyFieldValue(invoice, "buyerCountryCode", buyerSourcePrefix, "CountryCode"),
+    };
+};
+
 const normalizeInvoicePayload = (payload: unknown) => {
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         return payload;
@@ -51,6 +125,7 @@ const normalizeInvoicePayload = (payload: unknown) => {
 
     return {
         ...invoice,
+        ...buildSellerBuyerPayload(invoice),
         payments,
         lines,
     };
@@ -71,12 +146,16 @@ const getEmirateSubdivision = (city: string): string | undefined => {
 };
 
 export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.object({
+    invoiceSubmissionType: z.enum(invoiceSubmissionTypes).transform((value) => value === "sales" ? "sale" : value),
     companyId: z.string().min(1, "companyId is required"),
+    supplierParticipantId: z.string().min(1, "supplierParticipantId is required"),
+    customerParticipantId: z.string().min(1, "customerParticipantId is required"),
     invoiceRef: z.string().optional(),
     documentId: z.string().min(1, "documentId is required"),
+    status: z.string().min(1, "status is required"),
     issueDate: z.string().min(1, "issueDate is required"),
     invoiceTypeCode: z.string().min(1, "invoiceTypeCode is required"),
-    invoiceTransactionType: z.coerce.string().min(1, "invoiceTransactionType is required"),
+    invoiceTransactionType: z.coerce.number(),
     documentCurrencyCode: z.string().min(1, "documentCurrencyCode is required"),
     sellerName: z.string().min(1, "sellerName is required"),
     sellerVatTrn: z.string().min(1, "sellerVatTrn is required"),

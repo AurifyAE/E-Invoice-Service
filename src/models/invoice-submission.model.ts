@@ -42,12 +42,16 @@ const paymentSchema = new Schema(
 
 const invoicePayloadSchema = new Schema(
     {
+        invoiceSubmissionType: { type: String, enum: ["sale", "purchase"], required: true },
         companyId: { type: String, required: true },
+        supplierParticipantId: { type: String, required: true },
+        customerParticipantId: { type: String, required: true },
         invoiceRef: { type: String },
         documentId: { type: String, required: true },
+        status: { type: String, required: true },
         issueDate: { type: String, required: true },
         invoiceTypeCode: { type: String, required: true },
-        invoiceTransactionType: { type: String, required: true },
+        invoiceTransactionType: { type: Number, required: true },
         documentCurrencyCode: { type: String, required: true },
         sellerName: { type: String, required: true },
         sellerVatTrn: { type: String, required: true },

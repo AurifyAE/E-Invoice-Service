@@ -26,23 +26,6 @@ export const paymentSchema = z.object({
     paymentMeansCode: z.string().min(1, "paymentMeansCode is required"),
 });
 
-const invoiceSubmissionTypes = ["sale", "sales", "purchase"] as const;
-
-const getStringValue = (record: Record<string, unknown>, key: string): string | undefined => {
-    const value = record[key];
-    return typeof value === "string" && value.trim() ? value : undefined;
-};
-
-const resolveInvoiceSubmissionType = (invoice: Record<string, unknown>): "sale" | "purchase" => {
-    const rawType = getStringValue(invoice, "invoiceSubmissionType")
-        ?? getStringValue(invoice, "invoiceTransactionType")
-        ?? getStringValue(invoice, "invoiceDirection")
-        ?? getStringValue(invoice, "transactionType")
-        ?? "sale";
-
-    return rawType.trim().toLowerCase() === "purchase" ? "purchase" : "sale";
-};
-
 const getNestedRecord = (record: Record<string, unknown>, key: string): Record<string, unknown> | undefined => {
     const value = record[key];
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -77,26 +60,21 @@ const getMappedPartyFieldValue = (
 };
 
 const buildSellerBuyerPayload = (invoice: Record<string, unknown>) => {
-    const invoiceSubmissionType = resolveInvoiceSubmissionType(invoice);
-    const sellerSourcePrefix = invoiceSubmissionType === "purchase" ? "party" : "organization";
-    const buyerSourcePrefix = invoiceSubmissionType === "purchase" ? "organization" : "party";
-
     return {
-        invoiceSubmissionType,
-        sellerName: getMappedPartyFieldValue(invoice, "sellerName", sellerSourcePrefix, "Name"),
-        sellerVatTrn: getMappedPartyFieldValue(invoice, "sellerVatTrn", sellerSourcePrefix, "VatTrn"),
-        sellerRegisteredName: getMappedPartyFieldValue(invoice, "sellerRegisteredName", sellerSourcePrefix, "RegisteredName"),
-        sellerAddressLine1: getMappedPartyFieldValue(invoice, "sellerAddressLine1", sellerSourcePrefix, "AddressLine1"),
-        sellerCity: getMappedPartyFieldValue(invoice, "sellerCity", sellerSourcePrefix, "City"),
-        sellerCountrySubdivision: getMappedPartyFieldValue(invoice, "sellerCountrySubdivision", sellerSourcePrefix, "CountrySubdivision"),
-        sellerCountryCode: getMappedPartyFieldValue(invoice, "sellerCountryCode", sellerSourcePrefix, "CountryCode"),
-        buyerName: getMappedPartyFieldValue(invoice, "buyerName", buyerSourcePrefix, "Name"),
-        buyerVatTrn: getMappedPartyFieldValue(invoice, "buyerVatTrn", buyerSourcePrefix, "VatTrn"),
-        buyerRegisteredName: getMappedPartyFieldValue(invoice, "buyerRegisteredName", buyerSourcePrefix, "RegisteredName"),
-        buyerAddressLine1: getMappedPartyFieldValue(invoice, "buyerAddressLine1", buyerSourcePrefix, "AddressLine1"),
-        buyerCity: getMappedPartyFieldValue(invoice, "buyerCity", buyerSourcePrefix, "City"),
-        buyerCountrySubdivision: getMappedPartyFieldValue(invoice, "buyerCountrySubdivision", buyerSourcePrefix, "CountrySubdivision"),
-        buyerCountryCode: getMappedPartyFieldValue(invoice, "buyerCountryCode", buyerSourcePrefix, "CountryCode"),
+        sellerName: getMappedPartyFieldValue(invoice, "sellerName", "organization", "Name"),
+        sellerVatTrn: getMappedPartyFieldValue(invoice, "sellerVatTrn", "organization", "VatTrn"),
+        sellerRegisteredName: getMappedPartyFieldValue(invoice, "sellerRegisteredName", "organization", "RegisteredName"),
+        sellerAddressLine1: getMappedPartyFieldValue(invoice, "sellerAddressLine1", "organization", "AddressLine1"),
+        sellerCity: getMappedPartyFieldValue(invoice, "sellerCity", "organization", "City"),
+        sellerCountrySubdivision: getMappedPartyFieldValue(invoice, "sellerCountrySubdivision", "organization", "CountrySubdivision"),
+        sellerCountryCode: getMappedPartyFieldValue(invoice, "sellerCountryCode", "organization", "CountryCode"),
+        buyerName: getMappedPartyFieldValue(invoice, "buyerName", "party", "Name"),
+        buyerVatTrn: getMappedPartyFieldValue(invoice, "buyerVatTrn", "party", "VatTrn"),
+        buyerRegisteredName: getMappedPartyFieldValue(invoice, "buyerRegisteredName", "party", "RegisteredName"),
+        buyerAddressLine1: getMappedPartyFieldValue(invoice, "buyerAddressLine1", "party", "AddressLine1"),
+        buyerCity: getMappedPartyFieldValue(invoice, "buyerCity", "party", "City"),
+        buyerCountrySubdivision: getMappedPartyFieldValue(invoice, "buyerCountrySubdivision", "party", "CountrySubdivision"),
+        buyerCountryCode: getMappedPartyFieldValue(invoice, "buyerCountryCode", "party", "CountryCode"),
     };
 };
 
@@ -146,7 +124,6 @@ const getEmirateSubdivision = (city: string): string | undefined => {
 };
 
 export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.object({
-    invoiceSubmissionType: z.enum(invoiceSubmissionTypes).transform((value) => value === "sales" ? "sale" : value),
     companyId: z.string().min(1, "companyId is required"),
     supplierParticipantId: z.string().min(1, "supplierParticipantId is required"),
     customerParticipantId: z.string().min(1, "customerParticipantId is required"),
@@ -155,7 +132,7 @@ export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.o
     status: z.string().min(1, "status is required"),
     issueDate: z.string().min(1, "issueDate is required"),
     invoiceTypeCode: z.string().min(1, "invoiceTypeCode is required"),
-    invoiceTransactionType: z.coerce.number(),
+    invoiceTransactionType: z.literal(0),
     documentCurrencyCode: z.string().min(1, "documentCurrencyCode is required"),
     sellerName: z.string().min(1, "sellerName is required"),
     sellerVatTrn: z.string().min(1, "sellerVatTrn is required"),

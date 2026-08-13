@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { ZodError } from "zod";
 import { env } from "../../config/env.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
@@ -10,57 +9,6 @@ export interface ServiceResponse {
     statusCode: number;
     body: Record<string, unknown>;
 }
-
-type AigentrixFailedRule = {
-    severity?: string;
-    field?: string;
-    id?: string;
-    message?: string;
-};
-
-type AigentrixValidationError = {
-    validatedAt?: string;
-    totalInvoices?: number;
-    passedCount?: number;
-    failedCount?: number;
-    results?: Array<{
-        invoiceId?: string;
-        invoiceTypeCode?: string;
-        summary?: string;
-        schematronDetail?: {
-            failedRules?: AigentrixFailedRule[];
-            warnings?: unknown[];
-        };
-    }>;
-};
-
-const buildAigentrixValidationDetails = (error: unknown) => {
-    if (typeof error !== "object" || error === null) {
-        return error;
-    }
-
-    const validationError = error as AigentrixValidationError;
-    const failedRules = validationError.results?.flatMap((result) => {
-        return result.schematronDetail?.failedRules?.map((rule) => ({
-            invoiceId: result.invoiceId,
-            invoiceTypeCode: result.invoiceTypeCode,
-            summary: result.summary,
-            severity: rule.severity,
-            field: rule.field,
-            id: rule.id,
-            message: rule.message,
-        })) ?? [];
-    }) ?? [];
-
-    return {
-        validatedAt: validationError.validatedAt,
-        totalInvoices: validationError.totalInvoices,
-        passedCount: validationError.passedCount,
-        failedCount: validationError.failedCount,
-        failedRules,
-        raw: validationError,
-    };
-};
 
 const validateWithProvider = async (payload: InvoiceSubmissionPayload) => {
     try {
@@ -95,27 +43,8 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
         return undefined;
     }
 
-    const visited = new WeakSet<object>();
-
     const findEntryId = (value: unknown): number | undefined => {
         if (typeof value !== "object" || value === null) {
-            return undefined;
-        }
-
-        if (visited.has(value)) {
-            return undefined;
-        }
-
-        visited.add(value);
-
-        if (Array.isArray(value)) {
-            for (const item of value) {
-                const entryId = findEntryId(item);
-                if (entryId) {
-                    return entryId;
-                }
-            }
-
             return undefined;
         }
 
@@ -130,13 +59,6 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
             return record.entryId;
         }
 
-        for (const nestedValue of Object.values(record)) {
-            const entryId = findEntryId(nestedValue);
-            if (entryId) {
-                return entryId;
-            }
-        }
-
         return undefined;
     };
 
@@ -145,17 +67,12 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
 
 const buildInvoicePayload = (payload: unknown) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
-    const invoiceDirection = typeof rawPayload.invoiceTransactionType === "string" && rawPayload.invoiceTransactionType.trim()
-        ? rawPayload.invoiceTransactionType
-        : "Sale";
-    const isPurchase = invoiceDirection.trim().toLowerCase() === "purchase";
 
     return {
         ...rawPayload,
-        invoiceSubmissionType: isPurchase ? "purchase" : "sale",
         companyId: String(env.AIGENTRIX_COMPANY_ID),
-        supplierParticipantId: String(isPurchase ? env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID : env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID),
-        customerParticipantId: String(isPurchase ? env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID : env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
+        supplierParticipantId: String(env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID),
+        customerParticipantId: String(env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
         invoiceTypeCode: String(env.AIGENTRIX_INVOICE_TYPE_CODE),
         status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
@@ -175,15 +92,12 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
                 body: {
                     success: false,
                     data: {
-                        companyId: parsedPayload.companyId,
                         documentId: parsedPayload.documentId,
-                        invoiceRef: parsedPayload.invoiceRef,
                         status: "VALIDATION_FAILED",
                         provider: "aigentrix",
                         providerError: {
                             code: "AIGENTRIX_VALIDATION_FAILED",
-                            message: "Aigentrix invoice validation failed",
-                            details: buildAigentrixValidationDetails(validationResult.error),
+                            message: "Aigentrix invoice validation failed"
                         },
                     },
                 },
@@ -242,32 +156,6 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
             };
         }
 
-        if (error instanceof mongoose.Error.ValidationError) {
-            return {
-                statusCode: 400,
-                body: {
-                    success: false,
-                    error: {
-                        code: "DATABASE_VALIDATION_ERROR",
-                        message: error.message,
-                    },
-                },
-            };
-        }
-
-        if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
-            return {
-                statusCode: 409,
-                body: {
-                    success: false,
-                    error: {
-                        code: "DUPLICATE_INVOICE_SUBMISSION",
-                        message: "Invoice submission already exists for this companyId and documentId",
-                    },
-                },
-            };
-        }
-
         return {
             statusCode: 500,
             body: {
@@ -284,7 +172,7 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
 export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
 
-    if (!entryId || Number.isNaN(parsedEntryId) || parsedEntryId <= 0) {
+    if (!entryId || Number.isNaN(parsedEntryId)) {
         return {
             statusCode: 400,
             body: {

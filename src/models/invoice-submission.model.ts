@@ -42,7 +42,6 @@ const paymentSchema = new Schema(
 
 const invoicePayloadSchema = new Schema(
     {
-        invoiceSubmissionType: { type: String, enum: ["sale", "purchase"], required: true },
         companyId: { type: String, required: true },
         supplierParticipantId: { type: String, required: true },
         customerParticipantId: { type: String, required: true },
@@ -92,9 +91,7 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
         },
         provider: {
             type: String,
-            enum: ["aigentrix"],
-            required: true,
-            default: "aigentrix",
+            required: true
         },
         providerValidationResponse: { type: Schema.Types.Mixed },
         providerResponse: { type: Schema.Types.Mixed },

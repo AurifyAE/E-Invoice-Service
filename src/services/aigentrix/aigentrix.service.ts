@@ -19,10 +19,6 @@ const buildUrl = (path: string): string => {
 };
 
 const parseResponse = (responseText: string): unknown => {
-    if (!responseText) {
-        return null;
-    }
-
     try {
         return JSON.parse(responseText) as unknown;
     } catch {
@@ -71,13 +67,6 @@ const postToAigentrix = async (
     const responseText = await response.text();
     const data = parseResponse(responseText);
 
-    if (!response.ok) {
-        return {
-            success: false,
-            error: data,
-        };
-    }
-
     if (shouldCheckValidationResult && hasValidationFailure(data)) {
         return {
             success: false,
@@ -110,13 +99,6 @@ export const getInvoiceEntry = async (entryId: number): Promise<AigentrixResult>
 
     const responseText = await response.text();
     const data = parseResponse(responseText);
-
-    if (!response.ok) {
-        return {
-            success: false,
-            error: data,
-        };
-    }
 
     return {
         success: true,

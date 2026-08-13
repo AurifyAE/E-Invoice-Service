@@ -1,5 +1,6 @@
 import { ZodError } from "zod";
 import { env } from "../../config/env.js";
+import { EntryDataModel } from "../../models/entry-data.model.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
@@ -78,6 +79,37 @@ const buildInvoicePayload = (payload: unknown) => {
         invoiceTransactionType: 0,
         payments: [{ paymentMeansCode: "30" }],
     };
+};
+
+const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
+    if (typeof data !== "object" || data === null) {
+        return undefined;
+    }
+
+    const entryId = (data as Record<string, unknown>).id;
+
+    if (typeof entryId === "number") {
+        return entryId;
+    }
+
+    return undefined;
+};
+
+const upsertEntryData = async (entryId: number, entryData: Record<string, unknown>) => {
+    await EntryDataModel.findOneAndUpdate(
+        { entryId },
+        {
+            $set: {
+                entryId,
+                entryData,
+            },
+        },
+        {
+            new: true,
+            upsert: true,
+            runValidators: true,
+        }
+    );
 };
 
 export const createInvoiceSubmission = async (payload: unknown): Promise<ServiceResponse> => {
@@ -200,6 +232,15 @@ export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse>
                     },
                 },
             };
+        }
+
+        if (typeof result.data === "object" && result.data !== null) {
+            const entryData = result.data as Record<string, unknown>;
+            const providerEntryId = getEntryIdFromProviderResponse(entryData);
+
+            if (providerEntryId) {
+                await upsertEntryData(providerEntryId, entryData);
+            }
         }
 
         return {

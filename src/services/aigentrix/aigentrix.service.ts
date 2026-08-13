@@ -105,3 +105,25 @@ export const getInvoiceEntry = async (entryId: number): Promise<AigentrixResult>
         data,
     };
 };
+
+export const getInvoiceStatusTimeline = async (entryId: number): Promise<AigentrixResult> => {
+    const statusTimelineUrl = buildUrl(
+        `/external/api/v1/eInvoiceEntry/${entryId}/statusTimeline?type=${env.AIGENTRIX_STATUS_TIMELINE_TYPE}`
+    );
+
+    const response = await fetch(statusTimelineUrl, {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+            "X-API-KEY": env.AIGENTRIX_API_KEY,
+        },
+    });
+
+    const responseText = await response.text();
+    const data = parseResponse(responseText);
+
+    return {
+        success: true,
+        data,
+    };
+};

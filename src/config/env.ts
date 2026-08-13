@@ -15,6 +15,7 @@ const envSchema = z.object({
     AIGENTRIX_INVOICE_STATUS: z.string().min(1, 'AIGENTRIX_INVOICE_STATUS is required'),
     AIGENTRIX_SUPPLIER_PARTICIPANT_ID: z.string().min(1, 'AIGENTRIX_SUPPLIER_PARTICIPANT_ID is required'),
     AIGENTRIX_CUSTOMER_PARTICIPANT_ID: z.string().min(1, 'AIGENTRIX_CUSTOMER_PARTICIPANT_ID is required'),
+    AIGENTRIX_STATUS_TIMELINE_TYPE: z.string().min(1, 'AIGENTRIX_STATUS_TIMELINE_TYPE is required'),
 });
 
 export const env = envSchema.parse(process.env);

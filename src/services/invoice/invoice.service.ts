@@ -1,10 +1,16 @@
 import { ZodError } from "zod";
 import { env } from "../../config/env.js";
 import { EntryDataModel } from "../../models/entry-data.model.js";
+import { EntryStatusTimelineModel } from "../../models/entry-status-timeline.model.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
-import { createFullInvoice, getInvoiceEntry as getAigentrixInvoiceEntry, validateInvoice } from "../aigentrix/aigentrix.service.js";
+import {
+    createFullInvoice,
+    getInvoiceEntry as getAigentrixInvoiceEntry,
+    getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
+    validateInvoice,
+} from "../aigentrix/aigentrix.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -102,6 +108,30 @@ const upsertEntryData = async (entryId: number, entryData: Record<string, unknow
             $set: {
                 entryId,
                 entryData,
+            },
+        },
+        {
+            new: true,
+            upsert: true,
+            runValidators: true,
+        }
+    );
+};
+
+const upsertEntryStatusTimelineData = async (
+    entryId: number,
+    statusTimeline: Record<string, unknown>,
+) => {
+    await EntryStatusTimelineModel.findOneAndUpdate(
+        {
+            entryId,
+            type: env.AIGENTRIX_STATUS_TIMELINE_TYPE,
+        },
+        {
+            $set: {
+                entryId,
+                type: env.AIGENTRIX_STATUS_TIMELINE_TYPE,
+                statusTimeline,
             },
         },
         {
@@ -257,6 +287,67 @@ export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse>
                 error: {
                     code: "AIGENTRIX_ENTRY_FETCH_FAILED",
                     message: error instanceof Error ? error.message : "Failed to fetch invoice entry from Aigentrix",
+                },
+            },
+        };
+    }
+};
+
+export const getInvoiceStatusTimeline = async (entryId: string): Promise<ServiceResponse> => {
+    const parsedEntryId = Number(entryId);
+
+    if (!entryId) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "INVALID_ENTRY_ID",
+                    message: "Valid entryId is required",
+                },
+            },
+        };
+    }
+
+    try {
+        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId);
+
+        if (!result.success) {
+            return {
+                statusCode: 422,
+                body: {
+                    success: false,
+                    error: {
+                        code: "AIGENTRIX_STATUS_TIMELINE_FETCH_FAILED",
+                        message: "Failed to fetch invoice status timeline from Aigentrix",
+                        details: result.error,
+                    },
+                },
+            };
+        }
+
+        if (typeof result.data === "object" && result.data !== null && !Array.isArray(result.data)) {
+            const statusTimeline = (result.data as Record<string, unknown>).statusTimeline;
+
+            if (typeof statusTimeline === "object" && statusTimeline !== null && !Array.isArray(statusTimeline)) {
+                await upsertEntryStatusTimelineData(parsedEntryId, statusTimeline as Record<string, unknown>);
+            }
+        }
+
+        return {
+            statusCode: 200,
+            body: typeof result.data === "object" && result.data !== null
+                ? result.data as Record<string, unknown>
+                : { data: result.data },
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: {
+                success: false,
+                error: {
+                    code: "AIGENTRIX_STATUS_TIMELINE_FETCH_FAILED",
+                    message: error instanceof Error ? error.message : "Failed to fetch invoice status timeline from Aigentrix",
                 },
             },
         };

@@ -11,11 +11,13 @@ export const submitInvoice = async (req: Request, res: Response) => {
 };
 
 export const getInvoice = async (req: Request, res: Response) => {
-    const result = await getInvoiceEntry(String(req.params.entryId));
+    const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
+    const result = await getInvoiceEntry(String(req.params.entryId), vatTrn);
     return res.status(result.statusCode).json(result.body);
 };
 
 export const getInvoiceTimeline = async (req: Request, res: Response) => {
-    const result = await getInvoiceStatusTimeline(String(req.params.entryId));
+    const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
+    const result = await getInvoiceStatusTimeline(String(req.params.entryId), vatTrn);
     return res.status(result.statusCode).json(result.body);
 };

@@ -101,12 +101,13 @@ const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
     return undefined;
 };
 
-const upsertEntryData = async (entryId: number, entryData: Record<string, unknown>) => {
+const upsertEntryData = async (entryId: number, vatTrn: string, entryData: Record<string, unknown>) => {
     await EntryDataModel.findOneAndUpdate(
         { entryId },
         {
             $set: {
                 entryId,
+                vatTrn,
                 entryData,
             },
         },
@@ -120,6 +121,7 @@ const upsertEntryData = async (entryId: number, entryData: Record<string, unknow
 
 const upsertEntryStatusTimelineData = async (
     entryId: number,
+    vatTrn: string,
     statusTimeline: Record<string, unknown>,
 ) => {
     await EntryStatusTimelineModel.findOneAndUpdate(
@@ -131,6 +133,7 @@ const upsertEntryStatusTimelineData = async (
             $set: {
                 entryId,
                 type: env.AIGENTRIX_STATUS_TIMELINE_TYPE,
+                vatTrn,
                 statusTimeline,
             },
         },
@@ -231,8 +234,9 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
     }
 };
 
-export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse> => {
+export const getInvoiceEntry = async (entryId: string, vatTrn: string): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
+    const parsedVatTrn = vatTrn.trim();
 
     if (!entryId || Number.isNaN(parsedEntryId)) {
         return {
@@ -242,6 +246,19 @@ export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse>
                 error: {
                     code: "INVALID_ENTRY_ID",
                     message: "Valid entryId is required",
+                },
+            },
+        };
+    }
+
+    if (!parsedVatTrn) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "VAT_TRN_REQUIRED",
+                    message: "vatTrn is required",
                 },
             },
         };
@@ -269,7 +286,7 @@ export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse>
             const providerEntryId = getEntryIdFromProviderResponse(entryData);
 
             if (providerEntryId) {
-                await upsertEntryData(providerEntryId, entryData);
+                await upsertEntryData(providerEntryId, parsedVatTrn, entryData);
             }
         }
 
@@ -293,8 +310,9 @@ export const getInvoiceEntry = async (entryId: string): Promise<ServiceResponse>
     }
 };
 
-export const getInvoiceStatusTimeline = async (entryId: string): Promise<ServiceResponse> => {
+export const getInvoiceStatusTimeline = async (entryId: string, vatTrn: string): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
+    const parsedVatTrn = vatTrn.trim();
 
     if (!entryId) {
         return {
@@ -304,6 +322,19 @@ export const getInvoiceStatusTimeline = async (entryId: string): Promise<Service
                 error: {
                     code: "INVALID_ENTRY_ID",
                     message: "Valid entryId is required",
+                },
+            },
+        };
+    }
+
+    if (!parsedVatTrn) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "VAT_TRN_REQUIRED",
+                    message: "vatTrn is required",
                 },
             },
         };
@@ -330,7 +361,7 @@ export const getInvoiceStatusTimeline = async (entryId: string): Promise<Service
             const statusTimeline = (result.data as Record<string, unknown>).statusTimeline;
 
             if (typeof statusTimeline === "object" && statusTimeline !== null && !Array.isArray(statusTimeline)) {
-                await upsertEntryStatusTimelineData(parsedEntryId, statusTimeline as Record<string, unknown>);
+                await upsertEntryStatusTimelineData(parsedEntryId, parsedVatTrn, statusTimeline as Record<string, unknown>);
             }
         }
 

@@ -17,6 +17,53 @@ export interface ServiceResponse {
     body: Record<string, unknown>;
 }
 
+type LeanInvoiceSubmission = {
+    documentId?: string;
+    invoiceRef?: string;
+    entryId?: number;
+    status?: string;
+    payload?: {
+        invoiceRef?: string;
+        documentId?: string;
+        invoiceTypeCode?: string;
+        documentCurrencyCode?: string;
+        buyerName?: string;
+        sellerVatTrn?: string;
+        lineExtensionTotal?: number;
+        taxAmount?: number;
+        payableAmount?: number;
+        issueDate?: string;
+    };
+    providerError?: unknown;
+    providerValidationResponse?: unknown;
+    createdAt?: Date;
+    updatedAt?: Date;
+};
+
+type LeanEntryData = {
+    entryId: number;
+    vatTrn: string;
+    entryData?: {
+        id?: number;
+        documentId?: string;
+        invoiceRef?: string;
+        status?: string;
+        taxStatus?: string;
+        type?: string;
+        invoiceTypeCode?: string;
+        documentCurrencyCode?: string;
+        buyerName?: string;
+        sellerVatTrn?: string;
+        lineExtensionTotal?: number;
+        taxAmount?: number;
+        payableAmount?: number;
+        issueDate?: string;
+        updatedAt?: string;
+    };
+    createdAt?: Date;
+    updatedAt?: Date;
+};
+
 const validateWithProvider = async (payload: InvoiceSubmissionPayload) => {
     try {
         return await validateInvoice(payload);
@@ -145,6 +192,36 @@ const upsertEntryStatusTimelineData = async (
     );
 };
 
+const roundAmount = (amount: number): number => {
+    return Math.round(amount * 100) / 100;
+};
+
+const isFailedSubmissionStatus = (status?: string): boolean => {
+    return status === "FAILED";
+};
+
+const isAcknowledgedEntryStatus = (status?: string): boolean => {
+    return status === "ACKNOWLEDGED";
+};
+
+const getInvoiceDisplayType = (invoiceTypeCode?: string): string => {
+    if (invoiceTypeCode === "381") {
+        return "Credit Note";
+    }
+
+    return "Sale";
+};
+
+const getRecentActivityDate = (entry: LeanEntryData): Date => {
+    const providerUpdatedAt = entry.entryData?.updatedAt ? new Date(entry.entryData.updatedAt) : null;
+
+    if (providerUpdatedAt && !Number.isNaN(providerUpdatedAt.getTime())) {
+        return providerUpdatedAt;
+    }
+
+    return entry.updatedAt ?? entry.createdAt ?? new Date(0);
+};
+
 export const createInvoiceSubmission = async (payload: unknown): Promise<ServiceResponse> => {
     try {
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload));
@@ -207,6 +284,7 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
             },
         };
     } catch (error) {
+        console.log("Error in createInvoiceSubmission:", error);
         if (error instanceof ZodError) {
             return {
                 statusCode: 400,
@@ -228,6 +306,169 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
                 error: {
                     code: "INTERNAL_SERVER_ERROR",
                     message: "Failed to submit invoice",
+                },
+            },
+        };
+    }
+};
+
+export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceResponse> => {
+    const parsedVatTrn = vatTrn.trim();
+
+    if (!parsedVatTrn) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "VAT_TRN_REQUIRED",
+                    message: "vatTrn is required",
+                },
+            },
+        };
+    }
+
+    try {
+        const submissionFilter = { "payload.sellerVatTrn": parsedVatTrn };
+        const entryDataFilter = { vatTrn: parsedVatTrn };
+
+        const [submissions, entryDatas] = await Promise.all([
+            InvoiceSubmissionModel.find(submissionFilter).sort({ updatedAt: -1 }).lean<LeanInvoiceSubmission[]>(),
+            EntryDataModel.find(entryDataFilter).sort({ updatedAt: -1 }).lean<LeanEntryData[]>(),
+        ]);
+
+        const successfulDocumentIds = new Set(
+            entryDatas
+                .map((entry) => entry.entryData?.documentId)
+                .filter((documentId): documentId is string => Boolean(documentId))
+        );
+        const submissionsWithoutEntryData = submissions.filter((submission) => {
+            const documentId = submission.documentId ?? submission.payload?.documentId ?? "";
+            return !successfulDocumentIds.has(documentId);
+        });
+        const totalInvoices = entryDatas.length + submissionsWithoutEntryData.length;
+        const failed = submissionsWithoutEntryData.filter((submission) => isFailedSubmissionStatus(submission.status)).length;
+        const validationFailed = submissionsWithoutEntryData.filter((submission) => Boolean(submission.providerValidationResponse) && submission.status === "FAILED").length;
+        const submittedAttempts = submissions.filter((submission) => submission.status === "SUBMITTED").length;
+
+        const outboundEntries = entryDatas.filter((entry) => entry.entryData?.type === "OUTBOUND");
+        const inboundEntries = entryDatas.filter((entry) => entry.entryData?.type === "INBOUND");
+        const acknowledged = entryDatas.filter((entry) => isAcknowledgedEntryStatus(entry.entryData?.status)).length;
+        const failedOutbound = outboundEntries.filter((entry) => isFailedSubmissionStatus(entry.entryData?.status)).length;
+        const failedInbound = inboundEntries.filter((entry) => isFailedSubmissionStatus(entry.entryData?.status)).length;
+        const totalOutbound = outboundEntries.length;
+        const totalInbound = inboundEntries.length;
+        const successRate = totalOutbound > 0 ? roundAmount((acknowledged / totalOutbound) * 100) : 0;
+        const totalAmount = roundAmount(entryDatas.reduce((sum, entry) => sum + (Number(entry.entryData?.payableAmount) || 0), 0));
+        const totalVat = roundAmount(entryDatas.reduce((sum, entry) => sum + (Number(entry.entryData?.taxAmount) || 0), 0));
+
+        const customerMap = new Map<string, { name: string; invoiceCount: number; amount: number }>();
+        const currencyMap = new Map<string, { currency: string; invoiceCount: number; amount: number }>();
+
+        for (const entry of entryDatas) {
+            const customerName = entry.entryData?.buyerName?.trim() || "Unknown";
+            const currency = entry.entryData?.documentCurrencyCode?.trim() || "Unknown";
+            const payableAmount = Number(entry.entryData?.payableAmount) || 0;
+
+            const customer = customerMap.get(customerName) ?? {
+                name: customerName,
+                invoiceCount: 0,
+                amount: 0,
+            };
+            customer.invoiceCount += 1;
+            customer.amount = roundAmount(customer.amount + payableAmount);
+            customerMap.set(customerName, customer);
+
+            const currencySummary = currencyMap.get(currency) ?? {
+                currency,
+                invoiceCount: 0,
+                amount: 0,
+            };
+            currencySummary.invoiceCount += 1;
+            currencySummary.amount = roundAmount(currencySummary.amount + payableAmount);
+            currencyMap.set(currency, currencySummary);
+        }
+
+        const topCustomer = Array.from(customerMap.values()).sort((first, second) => second.amount - first.amount)[0] ?? null;
+        const topCurrency = Array.from(currencyMap.values()).sort((first, second) => second.amount - first.amount)[0] ?? null;
+
+        const recentEntryActivity = entryDatas.map((entry) => ({
+            entryId: entry.entryId,
+            voucher: entry.entryData?.documentId ?? entry.entryData?.invoiceRef ?? null,
+            type: getInvoiceDisplayType(entry.entryData?.invoiceTypeCode),
+            party: entry.entryData?.buyerName ?? null,
+            eInvoiceStatus: entry.entryData?.status ?? null,
+            taxStatus: entry.entryData?.taxStatus ?? null,
+            netAmount: roundAmount(Number(entry.entryData?.lineExtensionTotal) || 0),
+            payableAmount: roundAmount(Number(entry.entryData?.payableAmount) || 0),
+            source: "ENTRY_DATA",
+            updatedAt: getRecentActivityDate(entry).toISOString(),
+        }));
+
+        const failedSubmissionActivity = submissionsWithoutEntryData
+            .filter((submission) => submission.status === "FAILED")
+            .map((submission) => ({
+                entryId: submission.entryId ?? null,
+                voucher: submission.documentId ?? submission.payload?.documentId ?? submission.invoiceRef ?? null,
+                type: getInvoiceDisplayType(submission.payload?.invoiceTypeCode),
+                party: submission.payload?.buyerName ?? null,
+                eInvoiceStatus: submission.status ?? null,
+                taxStatus: null,
+                netAmount: roundAmount(Number(submission.payload?.lineExtensionTotal) || 0),
+                payableAmount: roundAmount(Number(submission.payload?.payableAmount) || 0),
+                source: "INVOICE_SUBMISSION",
+                updatedAt: (submission.updatedAt ?? submission.createdAt ?? new Date(0)).toISOString(),
+            }));
+
+        const recentActivity = [...recentEntryActivity, ...failedSubmissionActivity]
+            .sort((first, second) => new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime())
+            .slice(0, 10);
+
+        return {
+            statusCode: 200,
+            body: {
+                success: true,
+                data: {
+                    vatTrn: parsedVatTrn,
+                    summary: {
+                        totalInvoices,
+                        submittedAttempts,
+                        successfulInvoices: entryDatas.length,
+                        outbound: {
+                            count: totalOutbound,
+                            amount: totalAmount,
+                        },
+                        inbound: {
+                            count: totalInbound,
+                            amount: roundAmount(inboundEntries.reduce((sum, entry) => sum + (Number(entry.entryData?.payableAmount) || 0), 0)),
+                        },
+                        totalAmount,
+                        totalVat,
+                        successRate,
+                    },
+                    statusBreakdown: {
+                        acknowledged,
+                        failed,
+                        validationFailed,
+                        totalInbound,
+                        failedInbound,
+                        totalOutbound,
+                        failedOutbound,
+                    },
+                    topCustomer,
+                    topCurrency,
+                    recentActivity,
+                },
+            },
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: {
+                success: false,
+                error: {
+                    code: "DASHBOARD_FETCH_FAILED",
+                    message: error instanceof Error ? error.message : "Failed to fetch invoice dashboard data",
                 },
             },
         };

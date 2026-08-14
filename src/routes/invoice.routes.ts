@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { getInvoice, getInvoiceTimeline, submitInvoice } from "../controllers/invoice.controller.js";
+import { getDashboard, getInvoice, getInvoiceTimeline, submitInvoice } from "../controllers/invoice.controller.js";
 
 const invoiceRouter = Router();
 
 invoiceRouter.post("/submit", submitInvoice);
-invoiceRouter.get("/:entryId", getInvoice);
+invoiceRouter.get("/dashboard", getDashboard);
 invoiceRouter.get("/status-timeline/:entryId", getInvoiceTimeline);
+invoiceRouter.get("/:entryId", getInvoice);
 
 export default invoiceRouter;

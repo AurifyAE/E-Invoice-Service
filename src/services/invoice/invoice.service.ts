@@ -3,14 +3,17 @@ import { env } from "../../config/env.js";
 import { EntryDataModel } from "../../models/entry-data.model.js";
 import { EntryStatusTimelineModel } from "../../models/entry-status-timeline.model.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
+import { SellerConfigModel } from "../../models/seller-config.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
 import {
     createFullInvoice,
     getInvoiceEntry as getAigentrixInvoiceEntry,
     getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
+    resolveAigentrixRequestOptions,
     validateInvoice,
 } from "../aigentrix/aigentrix.service.js";
+import type { AigentrixRequestOptions } from "../aigentrix/aigentrix.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -64,9 +67,9 @@ type LeanEntryData = {
     updatedAt?: Date;
 };
 
-const validateWithProvider = async (payload: InvoiceSubmissionPayload) => {
+const validateWithProvider = async (payload: InvoiceSubmissionPayload, requestOptions: AigentrixRequestOptions) => {
     try {
-        return await validateInvoice(payload);
+        return await validateInvoice(payload, requestOptions);
     } catch (error) {
         return {
             success: false,
@@ -78,9 +81,9 @@ const validateWithProvider = async (payload: InvoiceSubmissionPayload) => {
     }
 };
 
-const submitToProvider = async (payload: InvoiceSubmissionPayload) => {
+const submitToProvider = async (payload: InvoiceSubmissionPayload, requestOptions: AigentrixRequestOptions) => {
     try {
-        return await createFullInvoice(payload);
+        return await createFullInvoice(payload, requestOptions);
     } catch (error) {
         return {
             success: false,
@@ -119,19 +122,43 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
     return findEntryId(providerResponse);
 };
 
-const buildInvoicePayload = (payload: unknown) => {
+const buildInvoicePayload = (
+    payload: unknown,
+    sellerConfig: { companyId: number; participantId: string },
+) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
 
     return {
         ...rawPayload,
-        companyId: String(env.AIGENTRIX_COMPANY_ID),
-        supplierParticipantId: String(env.AIGENTRIX_SUPPLIER_PARTICIPANT_ID),
+        companyId: String(sellerConfig.companyId),
+        supplierParticipantId: sellerConfig.participantId,
         customerParticipantId: String(env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
         invoiceTypeCode: String(env.AIGENTRIX_INVOICE_TYPE_CODE),
         status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
         payments: [{ paymentMeansCode: "30" }],
     };
+};
+
+const getSellerVatTrnFromPayload = (payload: unknown): number | null => {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        return null;
+    }
+
+    const invoicePayload = payload as Record<string, unknown>;
+    const organization = typeof invoicePayload.organization === "object"
+        && invoicePayload.organization !== null
+        && !Array.isArray(invoicePayload.organization)
+        ? invoicePayload.organization as Record<string, unknown>
+        : undefined;
+    const sellerVatTrn = invoicePayload.sellerVatTrn
+        ?? invoicePayload.organizationVatTrn
+        ?? organization?.vatTrn;
+    const parsedSellerVatTrn = Number(String(sellerVatTrn ?? "").trim());
+
+    return Number.isSafeInteger(parsedSellerVatTrn) && parsedSellerVatTrn > 0
+        ? parsedSellerVatTrn
+        : null;
 };
 
 const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
@@ -222,11 +249,33 @@ const getRecentActivityDate = (entry: LeanEntryData): Date => {
     return entry.updatedAt ?? entry.createdAt ?? new Date(0);
 };
 
-export const createInvoiceSubmission = async (payload: unknown): Promise<ServiceResponse> => {
+export const createInvoiceSubmission = async (
+    payload: unknown,
+    requestOptions: AigentrixRequestOptions = {},
+): Promise<ServiceResponse> => {
     try {
-        const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload));
+        const sellerVatTrn = getSellerVatTrnFromPayload(payload);
+        const sellerConfig = sellerVatTrn !== null
+            ? await SellerConfigModel.findOne({ sellerVatTrn }).lean()
+            : null;
 
-        const validationResult = await validateWithProvider(parsedPayload);
+        if (!sellerConfig) {
+            return {
+                statusCode: 422,
+                body: {
+                    success: false,
+                    error: {
+                        code: "SELLER_CONFIG_NOT_FOUND",
+                        message: "Before E-Invoice submission, please update your seller configuration.",
+                    },
+                },
+            };
+        }
+
+        const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
+        const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
+
+        const validationResult = await validateWithProvider(parsedPayload, aigentrixOptions);
 
         if (!validationResult.success) {
             return {
@@ -256,7 +305,7 @@ export const createInvoiceSubmission = async (payload: unknown): Promise<Service
             providerValidationResponse: validationResult.data,
         });
 
-        const providerResult = await submitToProvider(parsedPayload);
+        const providerResult = await submitToProvider(parsedPayload, aigentrixOptions);
 
         submission.status = providerResult.success ? "SUBMITTED" : "FAILED";
         submission.entryId = providerResult.success ? extractEntryId(providerResult.data) : undefined;
@@ -475,7 +524,11 @@ export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceRespon
     }
 };
 
-export const getInvoiceEntry = async (entryId: string, vatTrn: string): Promise<ServiceResponse> => {
+export const getInvoiceEntry = async (
+    entryId: string,
+    vatTrn: string,
+    requestOptions: AigentrixRequestOptions = {},
+): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
 
@@ -506,7 +559,7 @@ export const getInvoiceEntry = async (entryId: string, vatTrn: string): Promise<
     }
 
     try {
-        const result = await getAigentrixInvoiceEntry(parsedEntryId);
+        const result = await getAigentrixInvoiceEntry(parsedEntryId, requestOptions);
 
         if (!result.success) {
             return {
@@ -551,7 +604,11 @@ export const getInvoiceEntry = async (entryId: string, vatTrn: string): Promise<
     }
 };
 
-export const getInvoiceStatusTimeline = async (entryId: string, vatTrn: string): Promise<ServiceResponse> => {
+export const getInvoiceStatusTimeline = async (
+    entryId: string,
+    vatTrn: string,
+    requestOptions: AigentrixRequestOptions = {},
+): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
 
@@ -582,7 +639,7 @@ export const getInvoiceStatusTimeline = async (entryId: string, vatTrn: string):
     }
 
     try {
-        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId);
+        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, requestOptions);
 
         if (!result.success) {
             return {

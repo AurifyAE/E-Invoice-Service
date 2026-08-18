@@ -5,15 +5,20 @@ import {
     getInvoiceEntry,
     getInvoiceStatusTimeline,
 } from "../services/invoice/invoice.service.js";
+import type { AigentrixRequestOptions } from "../services/aigentrix/aigentrix.service.js";
+
+const getAigentrixRequestOptions = (req: Request): AigentrixRequestOptions => ({
+    apiKey: req.get("X-API-KEY")?.trim() || undefined,
+});
 
 export const submitInvoice = async (req: Request, res: Response) => {
-    const result = await createInvoiceSubmission(req.body);
+    const result = await createInvoiceSubmission(req.body, getAigentrixRequestOptions(req));
     return res.status(result.statusCode).json(result.body);
 };
 
 export const getInvoice = async (req: Request, res: Response) => {
     const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
-    const result = await getInvoiceEntry(String(req.params.entryId), vatTrn);
+    const result = await getInvoiceEntry(String(req.params.entryId), vatTrn, getAigentrixRequestOptions(req));
     return res.status(result.statusCode).json(result.body);
 };
 
@@ -25,6 +30,10 @@ export const getDashboard = async (req: Request, res: Response) => {
 
 export const getInvoiceTimeline = async (req: Request, res: Response) => {
     const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
-    const result = await getInvoiceStatusTimeline(String(req.params.entryId), vatTrn);
+    const result = await getInvoiceStatusTimeline(
+        String(req.params.entryId),
+        vatTrn,
+        getAigentrixRequestOptions(req),
+    );
     return res.status(result.statusCode).json(result.body);
 };

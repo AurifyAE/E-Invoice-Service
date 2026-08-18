@@ -7,6 +7,10 @@ export interface AigentrixResult {
     error?: unknown;
 }
 
+export interface AigentrixRequestOptions {
+    apiKey?: string;
+}
+
 type AigentrixValidationResponse = {
     failedCount?: number;
     results?: Array<{
@@ -26,6 +30,25 @@ const parseResponse = (responseText: string): unknown => {
     }
 };
 
+const getRequiredHeaderValue = (value: string | undefined, headerName: string): string => {
+    if (!value?.trim()) {
+        throw new Error(`${headerName} is required in the request headers`);
+    }
+
+    return value.trim();
+};
+
+export const resolveAigentrixRequestOptions = (
+    options: AigentrixRequestOptions = {},
+): Required<AigentrixRequestOptions> => ({
+    apiKey: getRequiredHeaderValue(options.apiKey, "X-API-KEY"),
+});
+
+const getAigentrixHeaders = (options: Required<AigentrixRequestOptions>): Record<string, string> => ({
+    "Content-Type": "application/json",
+    "X-API-KEY": options.apiKey,
+});
+
 const hasValidationFailure = (data: unknown): boolean => {
     if (typeof data !== "object" || data === null) {
         return false;
@@ -43,10 +66,11 @@ const postToAigentrix = async (
     payload: InvoiceSubmissionPayload,
     shouldCheckValidationResult = false,
     shouldWrapPayloadInArray = false,
+    requestOptions: AigentrixRequestOptions = {},
 ): Promise<AigentrixResult> => {
+    const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
     const requestBody = {
         ...payload,
-        companyId: env.AIGENTRIX_COMPANY_ID,
         invoiceTypeCode: env.AIGENTRIX_INVOICE_TYPE_CODE,
         status: env.AIGENTRIX_INVOICE_STATUS,
         invoiceTransactionType: 0,
@@ -57,10 +81,7 @@ const postToAigentrix = async (
 
     const response = await fetch(url, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-API-KEY": env.AIGENTRIX_API_KEY,
-        },
+        headers: getAigentrixHeaders(aigentrixOptions),
         body: JSON.stringify(requestPayload),
     });
 
@@ -80,21 +101,28 @@ const postToAigentrix = async (
     };
 };
 
-export const validateInvoice = async (payload: InvoiceSubmissionPayload): Promise<AigentrixResult> => {
-    return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/validate"), payload, true, true);
+export const validateInvoice = async (
+    payload: InvoiceSubmissionPayload,
+    requestOptions?: AigentrixRequestOptions,
+): Promise<AigentrixResult> => {
+    return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/validate"), payload, true, true, requestOptions);
 };
 
-export const createFullInvoice = async (payload: InvoiceSubmissionPayload): Promise<AigentrixResult> => {
-    return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/createFull"), payload);
+export const createFullInvoice = async (
+    payload: InvoiceSubmissionPayload,
+    requestOptions?: AigentrixRequestOptions,
+): Promise<AigentrixResult> => {
+    return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/createFull"), payload, false, false, requestOptions);
 };
 
-export const getInvoiceEntry = async (entryId: number): Promise<AigentrixResult> => {
+export const getInvoiceEntry = async (
+    entryId: number,
+    requestOptions?: AigentrixRequestOptions,
+): Promise<AigentrixResult> => {
+    const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
     const response = await fetch(buildUrl(`/external/api/v1/eInvoiceEntry/${entryId}`), {
         method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            "X-API-KEY": env.AIGENTRIX_API_KEY,
-        },
+        headers: getAigentrixHeaders(aigentrixOptions),
     });
 
     const responseText = await response.text();
@@ -106,17 +134,18 @@ export const getInvoiceEntry = async (entryId: number): Promise<AigentrixResult>
     };
 };
 
-export const getInvoiceStatusTimeline = async (entryId: number): Promise<AigentrixResult> => {
+export const getInvoiceStatusTimeline = async (
+    entryId: number,
+    requestOptions?: AigentrixRequestOptions,
+): Promise<AigentrixResult> => {
+    const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
     const statusTimelineUrl = buildUrl(
         `/external/api/v1/eInvoiceEntry/${entryId}/statusTimeline?type=${env.AIGENTRIX_STATUS_TIMELINE_TYPE}`
     );
 
     const response = await fetch(statusTimelineUrl, {
         method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            "X-API-KEY": env.AIGENTRIX_API_KEY,
-        },
+        headers: getAigentrixHeaders(aigentrixOptions),
     });
 
     const responseText = await response.text();

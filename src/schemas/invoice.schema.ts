@@ -133,6 +133,7 @@ export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.o
     issueDate: z.string().min(1, "issueDate is required"),
     invoiceTypeCode: z.string().min(1, "invoiceTypeCode is required"),
     invoiceTransactionType: z.literal(0),
+    creditNoteReasonCode: z.string().optional(),
     documentCurrencyCode: z.string().min(1, "documentCurrencyCode is required"),
     sellerName: z.string().min(1, "sellerName is required"),
     sellerVatTrn: z.string().min(1, "sellerVatTrn is required"),
@@ -156,7 +157,7 @@ export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.o
     lines: z.array(invoiceLineSchema).min(1, "At least one invoice line is required"),
 }).transform((invoice) => ({
     ...invoice,
-    payments: invoice.payments ?? [{ paymentMeansCode: "30" }],
+    ...(invoice.creditNoteReasonCode ? {} : { payments: invoice.payments ?? [{ paymentMeansCode: "30" }] }),
     buyerRegisteredName: invoice.buyerRegisteredName?.trim() || invoice.buyerName,
     sellerCountrySubdivision: invoice.sellerCountrySubdivision ?? getEmirateSubdivision(invoice.sellerCity),
     buyerCountrySubdivision: invoice.buyerCountrySubdivision ?? getEmirateSubdivision(invoice.buyerCity),

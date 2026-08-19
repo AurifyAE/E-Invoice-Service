@@ -127,16 +127,27 @@ const buildInvoicePayload = (
     sellerConfig: { companyId: number; participantId: string },
 ) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
+    const isCreditNote = rawPayload.invoiceTransactionType === "creditNote";
+    const invoicePayload = { ...rawPayload };
+
+    delete invoicePayload.creditNoteReasonCode;
+    delete invoicePayload.invoiceTransactionType;
+    delete invoicePayload.paymentMeans;
+    delete invoicePayload.payments;
 
     return {
-        ...rawPayload,
+        ...invoicePayload,
         companyId: String(sellerConfig.companyId),
         supplierParticipantId: sellerConfig.participantId,
         customerParticipantId: String(env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
-        invoiceTypeCode: String(env.AIGENTRIX_INVOICE_TYPE_CODE),
+        invoiceTypeCode: String(
+            isCreditNote ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE : env.AIGENTRIX_INVOICE_TYPE_CODE,
+        ),
         status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
-        payments: [{ paymentMeansCode: "30" }],
+        ...(isCreditNote
+            ? { creditNoteReasonCode: "VD" }
+            : { payments: [{ paymentMeansCode: "30" }] }),
     };
 };
 
@@ -302,7 +313,7 @@ export const createInvoiceSubmission = async (
             payload: parsedPayload,
             status: "PENDING",
             provider: "aigentrix",
-            providerValidationResponse: validationResult.data,
+            providerValidationResponse: validationResult.data
         });
 
         const providerResult = await submitToProvider(parsedPayload, aigentrixOptions);

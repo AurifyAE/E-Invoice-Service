@@ -51,6 +51,7 @@ const invoicePayloadSchema = new Schema(
         issueDate: { type: String, required: true },
         invoiceTypeCode: { type: String, required: true },
         invoiceTransactionType: { type: Number, required: true },
+        creditNoteReasonCode: { type: String },
         documentCurrencyCode: { type: String, required: true },
         sellerName: { type: String, required: true },
         sellerVatTrn: { type: String, required: true },

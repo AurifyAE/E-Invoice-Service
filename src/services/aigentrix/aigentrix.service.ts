@@ -69,13 +69,20 @@ const postToAigentrix = async (
     requestOptions: AigentrixRequestOptions = {},
 ): Promise<AigentrixResult> => {
     const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
-    const requestBody = {
-        ...payload,
-        invoiceTypeCode: env.AIGENTRIX_INVOICE_TYPE_CODE,
-        status: env.AIGENTRIX_INVOICE_STATUS,
-        invoiceTransactionType: 0,
-        payments: [{ paymentMeansCode: "30" }]
-    };
+    const isCreditNote = payload.invoiceTypeCode === env.AIGENTRIX_INVOICE_CREDITNOTE_CODE;
+    const requestBody = { ...payload };
+
+    delete requestBody.creditNoteReasonCode;
+    delete requestBody.payments;
+    requestBody.invoiceTypeCode = payload.invoiceTypeCode;
+    requestBody.status = env.AIGENTRIX_INVOICE_STATUS;
+    requestBody.invoiceTransactionType = 0;
+
+    if (isCreditNote) {
+        requestBody.creditNoteReasonCode = "VD";
+    } else {
+        requestBody.payments = [{ paymentMeansCode: "30" }];
+    }
 
     const requestPayload = shouldWrapPayloadInArray ? [requestBody] : requestBody;
 

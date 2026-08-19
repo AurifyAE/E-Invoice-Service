@@ -319,7 +319,6 @@ export const createInvoiceSubmission = async (
             body: {
                 success: providerResult.success,
                 data: {
-                    submissionId: submission.id,
                     companyId: submission.companyId,
                     documentId: submission.documentId,
                     entryId: submission.entryId,
@@ -328,12 +327,11 @@ export const createInvoiceSubmission = async (
                     provider: submission.provider,
                     providerValidationResponse: submission.providerValidationResponse,
                     providerResponse: submission.providerResponse,
-                    providerError: submission.providerError,
+                    providerError: submission.providerError
                 },
             },
         };
     } catch (error) {
-        console.log("Error in createInvoiceSubmission:", error);
         if (error instanceof ZodError) {
             return {
                 statusCode: 400,

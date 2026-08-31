@@ -14,6 +14,17 @@ const envSchema = z.object({
     AIGENTRIX_INVOICE_STATUS: z.string().min(1, 'AIGENTRIX_INVOICE_STATUS is required'),
     AIGENTRIX_CUSTOMER_PARTICIPANT_ID: z.string().min(1, 'AIGENTRIX_CUSTOMER_PARTICIPANT_ID is required'),
     AIGENTRIX_STATUS_TIMELINE_TYPE: z.string().min(1, 'AIGENTRIX_STATUS_TIMELINE_TYPE is required'),
+    // ZATCA is an optional integration at service startup. Its configuration is
+    // checked only when a ZATCA endpoint is used, so existing Aigentrix flows
+    // remain deployable without the Java SDK installed.
+    ZATCA_SDK_ROOT: z.string().min(1).optional(),
+    ZATCA_FATOORA_HOME: z.string().min(1).optional(),
+    ZATCA_SDK_CONFIG: z.string().min(1).optional(),
+    ZATCA_FATOORA_EXECUTABLE: z.string().min(1).optional(),
+    ZATCA_JAVA_HOME: z.string().min(1).optional(),
+    ZATCA_TEMP_DIR: z.string().min(1).optional(),
+    ZATCA_INITIAL_PIH: z.string().min(1).optional(),
+    ZATCA_SDK_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 });
 
 export const env = envSchema.parse(process.env);

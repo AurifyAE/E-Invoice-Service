@@ -23,40 +23,14 @@ const getValidationErrorResponse = (error: ZodError): SellerConfigServiceRespons
     },
 });
 
-const getDuplicateFieldNames = (config: {
-    sellerVatTrn: number;
-    companyId: number;
-    participantId: string;
-}, payload: {
-    sellerVatTrn?: number;
-    companyId?: number;
-    participantId?: string;
-}): string[] => {
-    const fields: string[] = [];
-
-    if (payload.sellerVatTrn !== undefined && config.sellerVatTrn === payload.sellerVatTrn) {
-        fields.push("sellerVatTrn");
-    }
-
-    if (payload.companyId !== undefined && config.companyId === payload.companyId) {
-        fields.push("companyId");
-    }
-
-    if (payload.participantId !== undefined && config.participantId === payload.participantId) {
-        fields.push("participantId");
-    }
-
-    return fields;
-};
-
-const getDuplicateErrorResponse = (fields: string[]): SellerConfigServiceResponse => ({
+const getDuplicateSellerVatTrnErrorResponse = (): SellerConfigServiceResponse => ({
     statusCode: 409,
     body: {
         success: false,
         error: {
             code: "SELLER_CONFIG_ALREADY_EXISTS",
-            message: `Seller configuration already exists for ${fields.join(", ")}`,
-            fields,
+            message: "Seller configuration already exists for sellerVatTrn",
+            fields: ["sellerVatTrn"],
         },
     },
 });
@@ -65,15 +39,11 @@ export const createSellerConfig = async (payload: unknown): Promise<SellerConfig
     try {
         const parsedPayload = createSellerConfigSchema.parse(payload);
         const existingConfig = await SellerConfigModel.findOne({
-            $or: [
-                { sellerVatTrn: parsedPayload.sellerVatTrn },
-                { companyId: parsedPayload.companyId },
-                { participantId: parsedPayload.participantId },
-            ],
+            sellerVatTrn: parsedPayload.sellerVatTrn,
         }).lean();
 
         if (existingConfig) {
-            return getDuplicateErrorResponse(getDuplicateFieldNames(existingConfig, parsedPayload));
+            return getDuplicateSellerVatTrnErrorResponse();
         }
 
         const sellerConfig = await SellerConfigModel.create(parsedPayload);
@@ -167,27 +137,6 @@ export const updateSellerConfig = async (
                     },
                 },
             };
-        }
-
-        const duplicateFilters: Array<{ companyId?: number; participantId?: string }> = [];
-
-        if (parsedPayload.companyId !== undefined) {
-            duplicateFilters.push({ companyId: parsedPayload.companyId });
-        }
-
-        if (parsedPayload.participantId !== undefined) {
-            duplicateFilters.push({ participantId: parsedPayload.participantId });
-        }
-
-        if (duplicateFilters.length > 0) {
-            const duplicateConfig = await SellerConfigModel.findOne({
-                _id: { $ne: sellerConfig._id },
-                $or: duplicateFilters,
-            }).lean();
-
-            if (duplicateConfig) {
-                return getDuplicateErrorResponse(getDuplicateFieldNames(duplicateConfig, parsedPayload));
-            }
         }
 
         if (parsedPayload.companyId !== undefined) {

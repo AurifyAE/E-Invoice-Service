@@ -17,13 +17,11 @@ const sellerConfigSchema = new Schema<SellerConfigDocument>(
         companyId: {
             type: Number,
             required: true,
-            unique: true,
             index: true,
         },
         participantId: {
             type: String,
             required: true,
-            unique: true,
             index: true,
         },
     },

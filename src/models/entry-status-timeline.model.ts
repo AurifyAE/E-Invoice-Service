@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
 export interface EntryStatusTimelineDocument extends mongoose.Document {
+    organizationId: string;
     entryId: number;
     type: string;
     vatTrn: string;
@@ -9,6 +10,11 @@ export interface EntryStatusTimelineDocument extends mongoose.Document {
 
 const entryStatusTimelineSchema = new Schema<EntryStatusTimelineDocument>(
     {
+        organizationId: {
+            type: String,
+            required: true,
+            index: true,
+        },
         entryId: {
             type: Number,
             required: true,
@@ -31,7 +37,10 @@ const entryStatusTimelineSchema = new Schema<EntryStatusTimelineDocument>(
     { timestamps: true }
 );
 
-entryStatusTimelineSchema.index({ entryId: 1, type: 1 }, { unique: true });
+entryStatusTimelineSchema.index(
+    { organizationId: 1, entryId: 1, type: 1 },
+    { unique: true, partialFilterExpression: { organizationId: { $exists: true } } },
+);
 
 export const EntryStatusTimelineModel = mongoose.model<EntryStatusTimelineDocument>(
     "EntryStatusTimeline",

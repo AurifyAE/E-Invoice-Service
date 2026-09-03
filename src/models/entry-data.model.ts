@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
 export interface EntryDataDocument extends mongoose.Document {
+    organizationId: string;
     entryId: number;
     vatTrn: string;
     entryData: Record<string, unknown>;
@@ -8,10 +9,14 @@ export interface EntryDataDocument extends mongoose.Document {
 
 const entryDataSchema = new Schema<EntryDataDocument>(
     {
+        organizationId: {
+            type: String,
+            required: true,
+            index: true,
+        },
         entryId: {
             type: Number,
             required: true,
-            unique: true,
             index: true,
         },
         vatTrn: {
@@ -25,6 +30,11 @@ const entryDataSchema = new Schema<EntryDataDocument>(
         },
     },
     { timestamps: true }
+);
+
+entryDataSchema.index(
+    { organizationId: 1, entryId: 1 },
+    { unique: true, partialFilterExpression: { organizationId: { $exists: true } } },
 );
 
 export const EntryDataModel = mongoose.model<EntryDataDocument>("EntryData", entryDataSchema);

@@ -6,12 +6,27 @@ const participantIdSchema = z
     .string()
     .trim()
     .regex(/^\d+:\d+$/, "participantId must use the digits:digits format");
+export const organizationIdSchema = z.string().trim().min(1, "organizationId is required");
 
-export const createSellerConfigSchema = z.object({
+const normalizeOrganizationId = (payload: unknown) => {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        return payload;
+    }
+
+    const sellerConfig = payload as Record<string, unknown>;
+
+    return {
+        ...sellerConfig,
+        organizationId: sellerConfig.organizationId ?? sellerConfig.OrganizationId,
+    };
+};
+
+export const createSellerConfigSchema = z.preprocess(normalizeOrganizationId, z.object({
+    organizationId: organizationIdSchema,
     sellerVatTrn: sellerVatTrnSchema,
     companyId: companyIdSchema,
     participantId: participantIdSchema,
-});
+}));
 
 export const updateSellerConfigSchema = z.object({
     companyId: companyIdSchema.optional(),

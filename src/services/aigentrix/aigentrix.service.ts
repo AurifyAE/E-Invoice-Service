@@ -18,6 +18,10 @@ type AigentrixValidationResponse = {
     }>;
 };
 
+type AigentrixProviderResponse = {
+    success?: boolean;
+};
+
 const buildUrl = (path: string): string => {
     return new URL(path, env.AIGENTRIX_BASE_URL).toString();
 };
@@ -61,6 +65,14 @@ const hasValidationFailure = (data: unknown): boolean => {
     );
 };
 
+const hasProviderFailure = (data: unknown): boolean => {
+    if (typeof data !== "object" || data === null) {
+        return false;
+    }
+
+    return (data as AigentrixProviderResponse).success === false;
+};
+
 const postToAigentrix = async (
     url: string,
     payload: InvoiceSubmissionPayload,
@@ -70,8 +82,9 @@ const postToAigentrix = async (
 ): Promise<AigentrixResult> => {
     const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
     const isCreditNote = payload.invoiceTypeCode === env.AIGENTRIX_INVOICE_CREDITNOTE_CODE;
-    const requestBody = { ...payload };
+    const requestBody: Partial<InvoiceSubmissionPayload> = { ...payload };
 
+    delete requestBody.organizationId;
     delete requestBody.creditNoteReasonCode;
     delete requestBody.payments;
     requestBody.invoiceTypeCode = payload.invoiceTypeCode;
@@ -95,7 +108,7 @@ const postToAigentrix = async (
     const responseText = await response.text();
     const data = parseResponse(responseText);
 
-    if (shouldCheckValidationResult && hasValidationFailure(data)) {
+    if (hasProviderFailure(data) || (shouldCheckValidationResult && hasValidationFailure(data))) {
         return {
             success: false,
             error: data,

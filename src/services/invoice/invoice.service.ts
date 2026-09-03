@@ -21,6 +21,7 @@ export interface ServiceResponse {
 }
 
 type LeanInvoiceSubmission = {
+    organizationId?: string;
     documentId?: string;
     invoiceRef?: string;
     entryId?: number;
@@ -44,6 +45,7 @@ type LeanInvoiceSubmission = {
 };
 
 type LeanEntryData = {
+    organizationId: string;
     entryId: number;
     vatTrn: string;
     entryData?: {
@@ -85,6 +87,7 @@ const submitToProvider = async (payload: InvoiceSubmissionPayload, requestOption
     try {
         return await createFullInvoice(payload, requestOptions);
     } catch (error) {
+        console.log("Error submitting invoice to provider:", error);
         return {
             success: false,
             error: {
@@ -139,7 +142,6 @@ const buildInvoicePayload = (
         ...invoicePayload,
         companyId: String(sellerConfig.companyId),
         supplierParticipantId: sellerConfig.participantId,
-        customerParticipantId: String(env.AIGENTRIX_CUSTOMER_PARTICIPANT_ID),
         invoiceTypeCode: String(
             isCreditNote ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE : env.AIGENTRIX_INVOICE_TYPE_CODE,
         ),
@@ -172,6 +174,19 @@ const getSellerVatTrnFromPayload = (payload: unknown): number | null => {
         : null;
 };
 
+const getOrganizationIdFromPayload = (payload: unknown): string | null => {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        return null;
+    }
+
+    const invoicePayload = payload as Record<string, unknown>;
+    const organizationId = invoicePayload.organizationId ?? invoicePayload.OrganizationId;
+
+    return typeof organizationId === "string" && organizationId.trim()
+        ? organizationId.trim()
+        : null;
+};
+
 const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
     if (typeof data !== "object" || data === null) {
         return undefined;
@@ -186,13 +201,19 @@ const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
     return undefined;
 };
 
-const upsertEntryData = async (entryId: number, vatTrn: string, entryData: Record<string, unknown>) => {
+const upsertEntryData = async (
+    entryId: number,
+    vatTrn: string,
+    organizationId: string,
+    entryData: Record<string, unknown>,
+) => {
     await EntryDataModel.findOneAndUpdate(
-        { entryId },
+        { entryId, organizationId },
         {
             $set: {
                 entryId,
                 vatTrn,
+                organizationId,
                 entryData,
             },
         },
@@ -207,11 +228,13 @@ const upsertEntryData = async (entryId: number, vatTrn: string, entryData: Recor
 const upsertEntryStatusTimelineData = async (
     entryId: number,
     vatTrn: string,
+    organizationId: string,
     statusTimeline: Record<string, unknown>,
 ) => {
     await EntryStatusTimelineModel.findOneAndUpdate(
         {
             entryId,
+            organizationId,
             type: env.AIGENTRIX_STATUS_TIMELINE_TYPE,
         },
         {
@@ -219,6 +242,7 @@ const upsertEntryStatusTimelineData = async (
                 entryId,
                 type: env.AIGENTRIX_STATUS_TIMELINE_TYPE,
                 vatTrn,
+                organizationId,
                 statusTimeline,
             },
         },
@@ -266,8 +290,9 @@ export const createInvoiceSubmission = async (
 ): Promise<ServiceResponse> => {
     try {
         const sellerVatTrn = getSellerVatTrnFromPayload(payload);
-        const sellerConfig = sellerVatTrn !== null
-            ? await SellerConfigModel.findOne({ sellerVatTrn }).lean()
+        const organizationId = getOrganizationIdFromPayload(payload);
+        const sellerConfig = sellerVatTrn !== null && organizationId !== null
+            ? await SellerConfigModel.findOne({ sellerVatTrn, organizationId }).lean()
             : null;
 
         if (!sellerConfig) {
@@ -299,7 +324,8 @@ export const createInvoiceSubmission = async (
                         provider: "aigentrix",
                         providerError: {
                             code: "AIGENTRIX_VALIDATION_FAILED",
-                            message: "Aigentrix invoice validation failed"
+                            message: "Aigentrix invoice validation failed",
+                            details: validationResult.error,
                         },
                     },
                 },
@@ -307,6 +333,7 @@ export const createInvoiceSubmission = async (
         }
 
         const submission = await InvoiceSubmissionModel.create({
+            organizationId: parsedPayload.organizationId,
             companyId: parsedPayload.companyId,
             invoiceRef: parsedPayload.invoiceRef,
             documentId: parsedPayload.documentId,
@@ -330,6 +357,7 @@ export const createInvoiceSubmission = async (
             body: {
                 success: providerResult.success,
                 data: {
+                    organizationId: submission.organizationId,
                     companyId: submission.companyId,
                     documentId: submission.documentId,
                     entryId: submission.entryId,
@@ -370,8 +398,12 @@ export const createInvoiceSubmission = async (
     }
 };
 
-export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceResponse> => {
+export const getInvoiceDashboard = async (
+    vatTrn: string,
+    organizationId: string,
+): Promise<ServiceResponse> => {
     const parsedVatTrn = vatTrn.trim();
+    const parsedOrganizationId = organizationId.trim();
 
     if (!parsedVatTrn) {
         return {
@@ -386,9 +418,25 @@ export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceRespon
         };
     }
 
+    if (!parsedOrganizationId) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "ORGANIZATION_ID_REQUIRED",
+                    message: "organizationId is required",
+                },
+            },
+        };
+    }
+
     try {
-        const submissionFilter = { "payload.sellerVatTrn": parsedVatTrn };
-        const entryDataFilter = { vatTrn: parsedVatTrn };
+        const submissionFilter = {
+            organizationId: parsedOrganizationId,
+            "payload.sellerVatTrn": parsedVatTrn,
+        };
+        const entryDataFilter = { organizationId: parsedOrganizationId, vatTrn: parsedVatTrn };
 
         const [submissions, entryDatas] = await Promise.all([
             InvoiceSubmissionModel.find(submissionFilter).sort({ updatedAt: -1 }).lean<LeanInvoiceSubmission[]>(),
@@ -488,6 +536,7 @@ export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceRespon
                 success: true,
                 data: {
                     vatTrn: parsedVatTrn,
+                    organizationId: parsedOrganizationId,
                     summary: {
                         totalInvoices,
                         submittedAttempts,
@@ -536,10 +585,12 @@ export const getInvoiceDashboard = async (vatTrn: string): Promise<ServiceRespon
 export const getInvoiceEntry = async (
     entryId: string,
     vatTrn: string,
+    organizationId: string,
     requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
+    const parsedOrganizationId = organizationId.trim();
 
     if (!entryId || Number.isNaN(parsedEntryId)) {
         return {
@@ -567,6 +618,19 @@ export const getInvoiceEntry = async (
         };
     }
 
+    if (!parsedOrganizationId) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "ORGANIZATION_ID_REQUIRED",
+                    message: "organizationId is required",
+                },
+            },
+        };
+    }
+
     try {
         const result = await getAigentrixInvoiceEntry(parsedEntryId, requestOptions);
 
@@ -589,7 +653,7 @@ export const getInvoiceEntry = async (
             const providerEntryId = getEntryIdFromProviderResponse(entryData);
 
             if (providerEntryId) {
-                await upsertEntryData(providerEntryId, parsedVatTrn, entryData);
+                await upsertEntryData(providerEntryId, parsedVatTrn, parsedOrganizationId, entryData);
             }
         }
 
@@ -616,10 +680,12 @@ export const getInvoiceEntry = async (
 export const getInvoiceStatusTimeline = async (
     entryId: string,
     vatTrn: string,
+    organizationId: string,
     requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
+    const parsedOrganizationId = organizationId.trim();
 
     if (!entryId) {
         return {
@@ -647,6 +713,19 @@ export const getInvoiceStatusTimeline = async (
         };
     }
 
+    if (!parsedOrganizationId) {
+        return {
+            statusCode: 400,
+            body: {
+                success: false,
+                error: {
+                    code: "ORGANIZATION_ID_REQUIRED",
+                    message: "organizationId is required",
+                },
+            },
+        };
+    }
+
     try {
         const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, requestOptions);
 
@@ -668,7 +747,12 @@ export const getInvoiceStatusTimeline = async (
             const statusTimeline = (result.data as Record<string, unknown>).statusTimeline;
 
             if (typeof statusTimeline === "object" && statusTimeline !== null && !Array.isArray(statusTimeline)) {
-                await upsertEntryStatusTimelineData(parsedEntryId, parsedVatTrn, statusTimeline as Record<string, unknown>);
+                await upsertEntryStatusTimelineData(
+                    parsedEntryId,
+                    parsedVatTrn,
+                    parsedOrganizationId,
+                    statusTimeline as Record<string, unknown>,
+                );
             }
         }
 

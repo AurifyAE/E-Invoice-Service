@@ -4,6 +4,7 @@ import type { InvoiceSubmissionPayload } from "../schemas/invoice.schema.js";
 export type InvoiceSubmissionStatus = "PENDING" | "SUBMITTED" | "FAILED";
 
 export interface InvoiceSubmissionDocument extends mongoose.Document {
+    organizationId: string;
     companyId: string;
     invoiceRef?: string;
     documentId: string;
@@ -42,6 +43,7 @@ const paymentSchema = new Schema(
 
 const invoicePayloadSchema = new Schema(
     {
+        organizationId: { type: String, required: true },
         companyId: { type: String, required: true },
         supplierParticipantId: { type: String, required: true },
         customerParticipantId: { type: String, required: true },
@@ -79,6 +81,7 @@ const invoicePayloadSchema = new Schema(
 
 const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
     {
+        organizationId: { type: String, required: true, index: true },
         companyId: { type: String, required: true, index: true },
         invoiceRef: { type: String },
         documentId: { type: String, required: true, index: true },
@@ -101,7 +104,10 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
     { timestamps: true }
 );
 
-invoiceSubmissionSchema.index({ companyId: 1, documentId: 1 }, { unique: true });
+invoiceSubmissionSchema.index(
+    { organizationId: 1, documentId: 1 },
+    { unique: true, partialFilterExpression: { organizationId: { $exists: true } } },
+);
 
 export const InvoiceSubmissionModel = mongoose.model<InvoiceSubmissionDocument>(
     "InvoiceSubmission",

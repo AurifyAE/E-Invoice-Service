@@ -33,6 +33,7 @@ class ZatcaProcessingError extends Error {
 const makeSuccessBody = async (invoice: {
     sourceId: string;
     documentId: string;
+    transactionType?: string;
     partyBusinessType: string;
     invoiceType: string;
     status: string;
@@ -43,6 +44,7 @@ const makeSuccessBody = async (invoice: {
     data: {
         sourceId: invoice.sourceId,
         documentId: invoice.documentId,
+        transactionType: invoice.transactionType ?? "SALE",
         partyBusinessType: invoice.partyBusinessType,
         invoiceType: invoice.invoiceType,
         status: invoice.status,
@@ -118,7 +120,7 @@ export const createZatcaSaleInvoice = async (payload: unknown): Promise<ZatcaSer
         if (existing) {
             return {
                 statusCode: 409,
-                body: { success: false, error: { code: "ZATCA_INVOICE_ALREADY_PROCESSING", message: "A ZATCA invoice already exists for this ERP Sale" } },
+                body: { success: false, error: { code: "ZATCA_INVOICE_ALREADY_PROCESSING", message: "A ZATCA invoice already exists for this ERP document" } },
             };
         }
 
@@ -127,6 +129,7 @@ export const createZatcaSaleInvoice = async (payload: unknown): Promise<ZatcaSer
                 sourceSystem: "ERP",
                 sourceType: invoice.sourceType,
                 sourceId: invoice.sourceId,
+                transactionType: invoice.transactionType,
                 sellerVatNumber: invoice.seller.vatNumber,
                 documentId: invoice.documentId,
                 partyBusinessType: invoice.partyBusinessType,
@@ -144,11 +147,11 @@ export const createZatcaSaleInvoice = async (payload: unknown): Promise<ZatcaSer
             }
             return {
                 statusCode: 409,
-                body: { success: false, error: { code: "ZATCA_INVOICE_ALREADY_PROCESSING", message: "A ZATCA invoice already exists for this ERP Sale" } },
+                body: { success: false, error: { code: "ZATCA_INVOICE_ALREADY_PROCESSING", message: "A ZATCA invoice already exists for this ERP document" } },
             };
         }
 
-        console.log(`[ZATCA] Processing B2C sale ${invoice.documentId}`);
+        console.log(`[ZATCA] Processing B2C ${invoice.transactionType === "CREDIT_NOTE" ? "credit note" : "sale"} ${invoice.documentId}`);
         const state = await reserveZatcaInvoiceState(invoice.seller.vatNumber);
         stateToken = state.token;
         console.log("[ZATCA] ICV reserved");
@@ -171,7 +174,7 @@ export const createZatcaSaleInvoice = async (payload: unknown): Promise<ZatcaSer
         await writeFile(inputXmlPath, unsignedXml, "utf8");
         invoiceRecord.status = ZATCA_INVOICE_STATUS.XML_GENERATED;
         await invoiceRecord.save();
-        console.log("[ZATCA] Simplified UBL XML generated");
+        console.log(`[ZATCA] Simplified ${invoice.transactionType === "CREDIT_NOTE" ? "credit-note" : "sale"} UBL XML generated`);
 
         try {
             await signInvoice(inputXmlPath, signedXmlPath, invoiceSdkConfigPath);
@@ -236,7 +239,7 @@ export const createZatcaSaleInvoice = async (payload: unknown): Promise<ZatcaSer
         await invoiceRecord.save();
         console.log("[ZATCA] QR generated");
         console.log("[ZATCA] QR payload extracted");
-        console.log("[ZATCA] Sale invoice QR processing completed");
+        console.log(`[ZATCA] ${invoice.transactionType === "CREDIT_NOTE" ? "Credit note" : "Sale invoice"} QR processing completed`);
 
         return { statusCode: 200, body: await makeSuccessBody(invoiceRecord) };
     } catch (error) {

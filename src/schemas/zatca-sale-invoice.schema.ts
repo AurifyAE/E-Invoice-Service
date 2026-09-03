@@ -70,9 +70,15 @@ export const zatcaSaleInvoiceSchema = z.object({
     sourceType: z.literal("SALE"),
     sourceId: z.string().trim().min(1),
     documentId: z.string().trim().min(1),
+    // Kept optional for backwards compatibility with existing simplified-sale
+    // callers. A missing value is a normal sale invoice.
+    transactionType: z.enum(["SALE", "CREDIT_NOTE"]).default("SALE"),
     partyBusinessType: z.enum(["B2C", "B2B"]),
     issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "issueDate must be YYYY-MM-DD"),
     issueTime: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "issueTime must be HH:mm:ss"),
+    originalInvoiceDocumentId: z.string().trim().min(1).optional(),
+    actualDeliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "actualDeliveryDate must be YYYY-MM-DD").optional(),
+    creditNoteReason: z.string().trim().min(1).max(1_000).optional(),
     currency: z.literal("SAR"),
     note: z.string().trim().max(1_000).optional(),
     seller: sellerSchema,
@@ -82,6 +88,18 @@ export const zatcaSaleInvoiceSchema = z.object({
     tax: taxSchema,
     totals: totalsSchema,
     items: z.array(itemSchema).min(1),
-}).strict();
+}).strict().superRefine((invoice, context) => {
+    if (invoice.transactionType !== "CREDIT_NOTE") return;
+
+    for (const field of ["originalInvoiceDocumentId", "actualDeliveryDate", "creditNoteReason"] as const) {
+        if (!invoice[field]) {
+            context.addIssue({
+                code: "custom",
+                path: [field],
+                message: `${field} is required when transactionType is CREDIT_NOTE`,
+            });
+        }
+    }
+});
 
 export type ZatcaSaleInvoiceRequest = z.infer<typeof zatcaSaleInvoiceSchema>;

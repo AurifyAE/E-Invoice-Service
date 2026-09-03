@@ -141,6 +141,17 @@ export const createSimplifiedInvoiceXml = (
 ): string => {
     const currency = xmlEscape(invoice.currency);
     const note = invoice.note ? `<cbc:Note>${xmlEscape(invoice.note)}</cbc:Note>` : "";
+    const isCreditNote = invoice.transactionType === "CREDIT_NOTE";
+    const documentTypeCode = isCreditNote ? "381" : "388";
+    const billingReference = isCreditNote
+        ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${xmlEscape(invoice.originalInvoiceDocumentId!)}</cbc:ID></cac:InvoiceDocumentReference></cac:BillingReference>`
+        : "";
+    const delivery = isCreditNote
+        ? `<cac:Delivery><cbc:ActualDeliveryDate>${xmlEscape(invoice.actualDeliveryDate!)}</cbc:ActualDeliveryDate></cac:Delivery>`
+        : "";
+    const paymentInstruction = isCreditNote
+        ? `<cbc:InstructionNote>${xmlEscape(invoice.creditNoteReason!)}</cbc:InstructionNote>`
+        : "";
     const buyer = invoice.buyer?.name
         ? `<cac:AccountingCustomerParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>${xmlEscape(invoice.buyer.name)}</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>`
         : "<cac:AccountingCustomerParty/>";
@@ -188,10 +199,11 @@ export const createSimplifiedInvoiceXml = (
   <cbc:UUID>${xmlEscape(state.uuid)}</cbc:UUID>
   <cbc:IssueDate>${xmlEscape(invoice.issueDate)}</cbc:IssueDate>
   <cbc:IssueTime>${xmlEscape(invoice.issueTime)}</cbc:IssueTime>
-  <cbc:InvoiceTypeCode name="0200000">388</cbc:InvoiceTypeCode>
+  <cbc:InvoiceTypeCode name="0200000">${documentTypeCode}</cbc:InvoiceTypeCode>
   ${note}
   <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
   <cbc:TaxCurrencyCode>SAR</cbc:TaxCurrencyCode>
+  ${billingReference}
   <cac:AdditionalDocumentReference><cbc:ID>ICV</cbc:ID><cbc:UUID>${state.icv}</cbc:UUID></cac:AdditionalDocumentReference>
   <cac:AdditionalDocumentReference><cbc:ID>PIH</cbc:ID><cac:Attachment><cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${xmlEscape(state.previousInvoiceHash)}</cbc:EmbeddedDocumentBinaryObject></cac:Attachment></cac:AdditionalDocumentReference>
   <cac:AdditionalDocumentReference><cbc:ID>QR</cbc:ID><cac:Attachment><cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain"/></cac:Attachment></cac:AdditionalDocumentReference>
@@ -203,7 +215,8 @@ export const createSimplifiedInvoiceXml = (
     <cac:PartyLegalEntity><cbc:RegistrationName>${xmlEscape(invoice.seller.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
   </cac:Party></cac:AccountingSupplierParty>
   ${buyer}
-  <cac:PaymentMeans><cbc:PaymentMeansCode>${xmlEscape(invoice.paymentMeansCode)}</cbc:PaymentMeansCode></cac:PaymentMeans>
+  ${delivery}
+  <cac:PaymentMeans><cbc:PaymentMeansCode>${xmlEscape(invoice.paymentMeansCode)}</cbc:PaymentMeansCode>${paymentInstruction}</cac:PaymentMeans>
   ${allowance}
   <cac:TaxTotal><cbc:TaxAmount currencyID="${currency}">${money(invoice.tax.taxAmount)}</cbc:TaxAmount></cac:TaxTotal>
   <cac:TaxTotal><cbc:TaxAmount currencyID="${currency}">${money(invoice.tax.taxAmount)}</cbc:TaxAmount>${subtotals}</cac:TaxTotal>

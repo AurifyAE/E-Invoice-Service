@@ -103,6 +103,7 @@ const normalizeInvoicePayload = (payload: unknown) => {
 
     return {
         ...invoice,
+        organizationId: invoice.organizationId ?? invoice.OrganizationId,
         ...buildSellerBuyerPayload(invoice),
         payments,
         lines,
@@ -124,9 +125,10 @@ const getEmirateSubdivision = (city: string): string | undefined => {
 };
 
 export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.object({
+    organizationId: z.string().trim().min(1, "organizationId is required"),
     companyId: z.string().min(1, "companyId is required"),
     supplierParticipantId: z.string().min(1, "supplierParticipantId is required"),
-    customerParticipantId: z.string().min(1, "customerParticipantId is required"),
+    customerParticipantId: z.string().trim().min(1, "customerParticipantId is required"),
     invoiceRef: z.string().optional(),
     documentId: z.string().min(1, "documentId is required"),
     status: z.string().min(1, "status is required"),

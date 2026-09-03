@@ -1,10 +1,11 @@
 import mongoose, { Schema } from "mongoose";
-import type { ZatcaInvoiceStatus, ZatcaInvoiceType, ZatcaPartyBusinessType } from "../types/zatca/zatcaSaleInvoice.types.js";
+import type { ZatcaInvoiceStatus, ZatcaInvoiceType, ZatcaPartyBusinessType, ZatcaTransactionType } from "../types/zatca/zatcaSaleInvoice.types.js";
 
 export interface ZatcaInvoiceDocument extends mongoose.Document {
     sourceSystem: string;
     sourceType: string;
     sourceId: string;
+    transactionType: ZatcaTransactionType;
     sellerVatNumber: string;
     documentId: string;
     partyBusinessType: ZatcaPartyBusinessType;
@@ -25,6 +26,7 @@ const zatcaInvoiceSchema = new Schema<ZatcaInvoiceDocument>(
         sourceSystem: { type: String, required: true, default: "ERP" },
         sourceType: { type: String, required: true },
         sourceId: { type: String, required: true },
+        transactionType: { type: String, enum: ["SALE", "CREDIT_NOTE"], required: true, default: "SALE" },
         sellerVatNumber: { type: String, required: true },
         documentId: { type: String, required: true },
         partyBusinessType: { type: String, enum: ["B2C", "B2B"], required: true },

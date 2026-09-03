@@ -13,6 +13,13 @@ export const ZATCA_SELLER_REGISTRATION = {
 
 export type ZatcaPartyBusinessType = typeof ZATCA_PARTY_BUSINESS_TYPE[keyof typeof ZATCA_PARTY_BUSINESS_TYPE];
 
+export const ZATCA_TRANSACTION_TYPE = {
+    SALE: "SALE",
+    CREDIT_NOTE: "CREDIT_NOTE",
+} as const;
+
+export type ZatcaTransactionType = typeof ZATCA_TRANSACTION_TYPE[keyof typeof ZATCA_TRANSACTION_TYPE];
+
 export const ZATCA_INVOICE_TYPE = {
     SIMPLIFIED: "SIMPLIFIED",
     STANDARD: "STANDARD",

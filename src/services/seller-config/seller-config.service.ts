@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 import { SellerConfigModel } from "../../models/seller-config.model.js";
 import {
     createSellerConfigSchema,
+    organizationIdSchema,
     sellerVatTrnParamSchema,
     updateSellerConfigSchema,
 } from "../../schemas/seller-config.schema.js";
@@ -39,6 +40,7 @@ export const createSellerConfig = async (payload: unknown): Promise<SellerConfig
     try {
         const parsedPayload = createSellerConfigSchema.parse(payload);
         const existingConfig = await SellerConfigModel.findOne({
+            organizationId: parsedPayload.organizationId,
             sellerVatTrn: parsedPayload.sellerVatTrn,
         }).lean();
 
@@ -74,10 +76,17 @@ export const createSellerConfig = async (payload: unknown): Promise<SellerConfig
     }
 };
 
-export const getSellerConfig = async (sellerVatTrn: string): Promise<SellerConfigServiceResponse> => {
+export const getSellerConfig = async (
+    sellerVatTrn: string,
+    organizationId: string,
+): Promise<SellerConfigServiceResponse> => {
     try {
         const parsedSellerVatTrn = sellerVatTrnParamSchema.parse(sellerVatTrn);
-        const sellerConfig = await SellerConfigModel.findOne({ sellerVatTrn: parsedSellerVatTrn }).lean();
+        const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+        const sellerConfig = await SellerConfigModel.findOne({
+            organizationId: parsedOrganizationId,
+            sellerVatTrn: parsedSellerVatTrn,
+        }).lean();
 
         if (!sellerConfig) {
             return {
@@ -119,12 +128,17 @@ export const getSellerConfig = async (sellerVatTrn: string): Promise<SellerConfi
 
 export const updateSellerConfig = async (
     sellerVatTrn: string,
+    organizationId: string,
     payload: unknown,
 ): Promise<SellerConfigServiceResponse> => {
     try {
         const parsedSellerVatTrn = sellerVatTrnParamSchema.parse(sellerVatTrn);
+        const parsedOrganizationId = organizationIdSchema.parse(organizationId);
         const parsedPayload = updateSellerConfigSchema.parse(payload);
-        const sellerConfig = await SellerConfigModel.findOne({ sellerVatTrn: parsedSellerVatTrn });
+        const sellerConfig = await SellerConfigModel.findOne({
+            organizationId: parsedOrganizationId,
+            sellerVatTrn: parsedSellerVatTrn,
+        });
 
         if (!sellerConfig) {
             return {

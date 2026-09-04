@@ -345,7 +345,26 @@ export const createInvoiceSubmission = async (
 
         const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
-        const { providerDocumentId } = await reserveProviderDocumentId(parsedPayload.documentId);
+        const existingSubmission = await InvoiceSubmissionModel.findOne({
+            organizationId: parsedPayload.organizationId,
+            documentId: parsedPayload.documentId,
+        });
+
+        if (existingSubmission && existingSubmission.status !== "FAILED") {
+            return {
+                statusCode: 409,
+                body: {
+                    success: false,
+                    error: {
+                        code: "INVOICE_ALREADY_SUBMITTED",
+                        message: "An invoice submission already exists for this documentId.",
+                    },
+                },
+            };
+        }
+
+        const providerDocumentId = existingSubmission?.providerDocumentId
+            ?? (await reserveProviderDocumentId(parsedPayload.documentId)).providerDocumentId;
         const providerPayload: InvoiceSubmissionPayload = {
             ...parsedPayload,
             documentId: providerDocumentId,
@@ -354,6 +373,19 @@ export const createInvoiceSubmission = async (
         const validationResult = await validateWithProvider(providerPayload, aigentrixOptions);
 
         if (!validationResult.success) {
+            if (existingSubmission) {
+                existingSubmission.payload = providerPayload;
+                existingSubmission.status = "FAILED";
+                existingSubmission.providerValidationResponse = validationResult.error;
+                existingSubmission.providerResponse = undefined;
+                existingSubmission.providerError = {
+                    code: "AIGENTRIX_VALIDATION_FAILED",
+                    message: "Aigentrix invoice validation failed",
+                    details: validationResult.error,
+                };
+                await existingSubmission.save();
+            }
+
             return {
                 statusCode: 422,
                 body: {
@@ -373,7 +405,7 @@ export const createInvoiceSubmission = async (
             };
         }
 
-        const submission = await InvoiceSubmissionModel.create({
+        const submission = existingSubmission ?? await InvoiceSubmissionModel.create({
             organizationId: parsedPayload.organizationId,
             companyId: parsedPayload.companyId,
             invoiceRef: parsedPayload.invoiceRef,
@@ -382,8 +414,21 @@ export const createInvoiceSubmission = async (
             payload: providerPayload,
             status: "PENDING",
             provider: "aigentrix",
-            providerValidationResponse: validationResult.data
+            providerValidationResponse: validationResult.data,
         });
+
+        if (existingSubmission) {
+            submission.companyId = parsedPayload.companyId;
+            submission.invoiceRef = parsedPayload.invoiceRef;
+            submission.providerDocumentId = providerDocumentId;
+            submission.payload = providerPayload;
+            submission.status = "PENDING";
+            submission.entryId = undefined;
+            submission.providerValidationResponse = validationResult.data;
+            submission.providerResponse = undefined;
+            submission.providerError = undefined;
+            await submission.save();
+        }
 
         const providerResult = await submitToProvider(providerPayload, aigentrixOptions);
 

@@ -12,6 +12,21 @@ export interface SellerConfigServiceResponse {
     body: Record<string, unknown>;
 }
 
+const toSellerConfigResponse = (sellerConfig: {
+    organizationId: string;
+    sellerVatTrn: number;
+    companyId: number;
+    participantId: string;
+    apiKey?: string;
+}) => ({
+    organizationId: sellerConfig.organizationId,
+    sellerVatTrn: sellerConfig.sellerVatTrn,
+    companyId: sellerConfig.companyId,
+    participantId: sellerConfig.participantId,
+    apiKey: sellerConfig.apiKey ?? "",
+    hasApiKey: Boolean(sellerConfig.apiKey),
+});
+
 const getValidationErrorResponse = (error: ZodError): SellerConfigServiceResponse => ({
     statusCode: 400,
     body: {
@@ -55,7 +70,7 @@ export const createSellerConfig = async (payload: unknown): Promise<SellerConfig
             body: {
                 success: true,
                 message: "Seller configuration created successfully",
-                data: sellerConfig,
+                data: toSellerConfigResponse(sellerConfig),
             },
         };
     } catch (error) {
@@ -86,7 +101,7 @@ export const getSellerConfig = async (
         const sellerConfig = await SellerConfigModel.findOne({
             organizationId: parsedOrganizationId,
             sellerVatTrn: parsedSellerVatTrn,
-        }).lean();
+        }).select("+apiKey").lean();
 
         if (!sellerConfig) {
             return {
@@ -105,7 +120,7 @@ export const getSellerConfig = async (
             statusCode: 200,
             body: {
                 success: true,
-                data: sellerConfig,
+                data: toSellerConfigResponse(sellerConfig),
             },
         };
     } catch (error) {
@@ -138,7 +153,7 @@ export const updateSellerConfig = async (
         const sellerConfig = await SellerConfigModel.findOne({
             organizationId: parsedOrganizationId,
             sellerVatTrn: parsedSellerVatTrn,
-        });
+        }).select("+apiKey");
 
         if (!sellerConfig) {
             return {
@@ -151,6 +166,10 @@ export const updateSellerConfig = async (
                     },
                 },
             };
+        }
+
+        if (parsedPayload.apiKey !== undefined) {
+            sellerConfig.apiKey = parsedPayload.apiKey;
         }
 
         if (parsedPayload.companyId !== undefined) {
@@ -168,7 +187,7 @@ export const updateSellerConfig = async (
             body: {
                 success: true,
                 message: "Seller configuration updated successfully",
-                data: sellerConfig,
+                data: toSellerConfigResponse(sellerConfig),
             },
         };
     } catch (error) {

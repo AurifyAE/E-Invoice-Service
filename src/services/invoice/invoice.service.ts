@@ -10,7 +10,6 @@ import {
     createFullInvoice,
     getInvoiceEntry as getAigentrixInvoiceEntry,
     getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
-    resolveAigentrixRequestOptions,
     validateInvoice,
 } from "../aigentrix/aigentrix.service.js";
 import type { AigentrixRequestOptions } from "../aigentrix/aigentrix.service.js";
@@ -187,6 +186,36 @@ const getOrganizationIdFromPayload = (payload: unknown): string | null => {
         : null;
 };
 
+const getAigentrixOptionsForSeller = async (
+    sellerVatTrn: string,
+    organizationId: string,
+): Promise<AigentrixRequestOptions | null> => {
+    const parsedSellerVatTrn = Number(sellerVatTrn);
+
+    if (!Number.isSafeInteger(parsedSellerVatTrn) || parsedSellerVatTrn <= 0) {
+        return null;
+    }
+
+    const sellerConfig = await SellerConfigModel.findOne({
+        organizationId,
+        sellerVatTrn: parsedSellerVatTrn,
+    }).select("+apiKey").lean();
+    const apiKey = sellerConfig?.apiKey?.trim();
+
+    return apiKey ? { apiKey } : null;
+};
+
+const getApiKeyNotConfiguredResponse = (): ServiceResponse => ({
+    statusCode: 422,
+    body: {
+        success: false,
+        error: {
+            code: "AIGENTRIX_API_KEY_NOT_CONFIGURED",
+            message: "Before using E-Invoice, save the Aigentrix API key in seller configuration.",
+        },
+    },
+});
+
 const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
     if (typeof data !== "object" || data === null) {
         return undefined;
@@ -286,13 +315,12 @@ const getRecentActivityDate = (entry: LeanEntryData): Date => {
 
 export const createInvoiceSubmission = async (
     payload: unknown,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     try {
         const sellerVatTrn = getSellerVatTrnFromPayload(payload);
         const organizationId = getOrganizationIdFromPayload(payload);
         const sellerConfig = sellerVatTrn !== null && organizationId !== null
-            ? await SellerConfigModel.findOne({ sellerVatTrn, organizationId }).lean()
+            ? await SellerConfigModel.findOne({ sellerVatTrn, organizationId }).select("+apiKey").lean()
             : null;
 
         if (!sellerConfig) {
@@ -308,7 +336,12 @@ export const createInvoiceSubmission = async (
             };
         }
 
-        const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
+        const apiKey = sellerConfig.apiKey?.trim();
+        if (!apiKey) {
+            return getApiKeyNotConfiguredResponse();
+        }
+
+        const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
 
         const validationResult = await validateWithProvider(parsedPayload, aigentrixOptions);
@@ -586,7 +619,6 @@ export const getInvoiceEntry = async (
     entryId: string,
     vatTrn: string,
     organizationId: string,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
@@ -632,7 +664,12 @@ export const getInvoiceEntry = async (
     }
 
     try {
-        const result = await getAigentrixInvoiceEntry(parsedEntryId, requestOptions);
+        const aigentrixOptions = await getAigentrixOptionsForSeller(parsedVatTrn, parsedOrganizationId);
+        if (!aigentrixOptions) {
+            return getApiKeyNotConfiguredResponse();
+        }
+
+        const result = await getAigentrixInvoiceEntry(parsedEntryId, aigentrixOptions);
 
         if (!result.success) {
             return {
@@ -681,7 +718,6 @@ export const getInvoiceStatusTimeline = async (
     entryId: string,
     vatTrn: string,
     organizationId: string,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
@@ -727,7 +763,12 @@ export const getInvoiceStatusTimeline = async (
     }
 
     try {
-        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, requestOptions);
+        const aigentrixOptions = await getAigentrixOptionsForSeller(parsedVatTrn, parsedOrganizationId);
+        if (!aigentrixOptions) {
+            return getApiKeyNotConfiguredResponse();
+        }
+
+        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, aigentrixOptions);
 
         if (!result.success) {
             return {

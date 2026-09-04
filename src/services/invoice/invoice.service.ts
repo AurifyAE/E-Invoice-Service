@@ -10,10 +10,10 @@ import {
     createFullInvoice,
     getInvoiceEntry as getAigentrixInvoiceEntry,
     getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
-    resolveAigentrixRequestOptions,
     validateInvoice,
 } from "../aigentrix/aigentrix.service.js";
 import type { AigentrixRequestOptions } from "../aigentrix/aigentrix.service.js";
+import { reserveProviderDocumentId } from "./invoice-number.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -23,6 +23,7 @@ export interface ServiceResponse {
 type LeanInvoiceSubmission = {
     organizationId?: string;
     documentId?: string;
+    providerDocumentId?: string;
     invoiceRef?: string;
     entryId?: number;
     status?: string;
@@ -187,6 +188,36 @@ const getOrganizationIdFromPayload = (payload: unknown): string | null => {
         : null;
 };
 
+const getAigentrixOptionsForSeller = async (
+    sellerVatTrn: string,
+    organizationId: string,
+): Promise<AigentrixRequestOptions | null> => {
+    const parsedSellerVatTrn = Number(sellerVatTrn);
+
+    if (!Number.isSafeInteger(parsedSellerVatTrn) || parsedSellerVatTrn <= 0) {
+        return null;
+    }
+
+    const sellerConfig = await SellerConfigModel.findOne({
+        organizationId,
+        sellerVatTrn: parsedSellerVatTrn,
+    }).select("+apiKey").lean();
+    const apiKey = sellerConfig?.apiKey?.trim();
+
+    return apiKey ? { apiKey } : null;
+};
+
+const getApiKeyNotConfiguredResponse = (): ServiceResponse => ({
+    statusCode: 422,
+    body: {
+        success: false,
+        error: {
+            code: "AIGENTRIX_API_KEY_NOT_CONFIGURED",
+            message: "Before using E-Invoice, save the Aigentrix API key in seller configuration.",
+        },
+    },
+});
+
 const getEntryIdFromProviderResponse = (data: unknown): number | undefined => {
     if (typeof data !== "object" || data === null) {
         return undefined;
@@ -286,13 +317,12 @@ const getRecentActivityDate = (entry: LeanEntryData): Date => {
 
 export const createInvoiceSubmission = async (
     payload: unknown,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     try {
         const sellerVatTrn = getSellerVatTrnFromPayload(payload);
         const organizationId = getOrganizationIdFromPayload(payload);
         const sellerConfig = sellerVatTrn !== null && organizationId !== null
-            ? await SellerConfigModel.findOne({ sellerVatTrn, organizationId }).lean()
+            ? await SellerConfigModel.findOne({ sellerVatTrn, organizationId }).select("+apiKey").lean()
             : null;
 
         if (!sellerConfig) {
@@ -308,18 +338,61 @@ export const createInvoiceSubmission = async (
             };
         }
 
-        const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
-        const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
+        const apiKey = sellerConfig.apiKey?.trim();
+        if (!apiKey) {
+            return getApiKeyNotConfiguredResponse();
+        }
 
-        const validationResult = await validateWithProvider(parsedPayload, aigentrixOptions);
+        const aigentrixOptions = { apiKey };
+        const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
+        const existingSubmission = await InvoiceSubmissionModel.findOne({
+            organizationId: parsedPayload.organizationId,
+            documentId: parsedPayload.documentId,
+        });
+
+        if (existingSubmission && existingSubmission.status !== "FAILED") {
+            return {
+                statusCode: 409,
+                body: {
+                    success: false,
+                    error: {
+                        code: "INVOICE_ALREADY_SUBMITTED",
+                        message: "An invoice submission already exists for this documentId.",
+                    },
+                },
+            };
+        }
+
+        const providerDocumentId = existingSubmission?.providerDocumentId
+            ?? (await reserveProviderDocumentId(parsedPayload.documentId)).providerDocumentId;
+        const providerPayload: InvoiceSubmissionPayload = {
+            ...parsedPayload,
+            documentId: providerDocumentId,
+        };
+
+        const validationResult = await validateWithProvider(providerPayload, aigentrixOptions);
 
         if (!validationResult.success) {
+            if (existingSubmission) {
+                existingSubmission.payload = providerPayload;
+                existingSubmission.status = "FAILED";
+                existingSubmission.providerValidationResponse = validationResult.error;
+                existingSubmission.providerResponse = undefined;
+                existingSubmission.providerError = {
+                    code: "AIGENTRIX_VALIDATION_FAILED",
+                    message: "Aigentrix invoice validation failed",
+                    details: validationResult.error,
+                };
+                await existingSubmission.save();
+            }
+
             return {
                 statusCode: 422,
                 body: {
                     success: false,
                     data: {
                         documentId: parsedPayload.documentId,
+                        providerDocumentId,
                         status: "VALIDATION_FAILED",
                         provider: "aigentrix",
                         providerError: {
@@ -332,18 +405,32 @@ export const createInvoiceSubmission = async (
             };
         }
 
-        const submission = await InvoiceSubmissionModel.create({
+        const submission = existingSubmission ?? await InvoiceSubmissionModel.create({
             organizationId: parsedPayload.organizationId,
             companyId: parsedPayload.companyId,
             invoiceRef: parsedPayload.invoiceRef,
             documentId: parsedPayload.documentId,
-            payload: parsedPayload,
+            providerDocumentId,
+            payload: providerPayload,
             status: "PENDING",
             provider: "aigentrix",
-            providerValidationResponse: validationResult.data
+            providerValidationResponse: validationResult.data,
         });
 
-        const providerResult = await submitToProvider(parsedPayload, aigentrixOptions);
+        if (existingSubmission) {
+            submission.companyId = parsedPayload.companyId;
+            submission.invoiceRef = parsedPayload.invoiceRef;
+            submission.providerDocumentId = providerDocumentId;
+            submission.payload = providerPayload;
+            submission.status = "PENDING";
+            submission.entryId = undefined;
+            submission.providerValidationResponse = validationResult.data;
+            submission.providerResponse = undefined;
+            submission.providerError = undefined;
+            await submission.save();
+        }
+
+        const providerResult = await submitToProvider(providerPayload, aigentrixOptions);
 
         submission.status = providerResult.success ? "SUBMITTED" : "FAILED";
         submission.entryId = providerResult.success ? extractEntryId(providerResult.data) : undefined;
@@ -360,6 +447,7 @@ export const createInvoiceSubmission = async (
                     organizationId: submission.organizationId,
                     companyId: submission.companyId,
                     documentId: submission.documentId,
+                    providerDocumentId: submission.providerDocumentId,
                     entryId: submission.entryId,
                     invoiceRef: submission.invoiceRef,
                     status: submission.status,
@@ -449,7 +537,7 @@ export const getInvoiceDashboard = async (
                 .filter((documentId): documentId is string => Boolean(documentId))
         );
         const submissionsWithoutEntryData = submissions.filter((submission) => {
-            const documentId = submission.documentId ?? submission.payload?.documentId ?? "";
+            const documentId = submission.providerDocumentId ?? submission.payload?.documentId ?? "";
             return !successfulDocumentIds.has(documentId);
         });
         const totalInvoices = entryDatas.length + submissionsWithoutEntryData.length;
@@ -586,7 +674,6 @@ export const getInvoiceEntry = async (
     entryId: string,
     vatTrn: string,
     organizationId: string,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
@@ -632,7 +719,12 @@ export const getInvoiceEntry = async (
     }
 
     try {
-        const result = await getAigentrixInvoiceEntry(parsedEntryId, requestOptions);
+        const aigentrixOptions = await getAigentrixOptionsForSeller(parsedVatTrn, parsedOrganizationId);
+        if (!aigentrixOptions) {
+            return getApiKeyNotConfiguredResponse();
+        }
+
+        const result = await getAigentrixInvoiceEntry(parsedEntryId, aigentrixOptions);
 
         if (!result.success) {
             return {
@@ -681,7 +773,6 @@ export const getInvoiceStatusTimeline = async (
     entryId: string,
     vatTrn: string,
     organizationId: string,
-    requestOptions: AigentrixRequestOptions = {},
 ): Promise<ServiceResponse> => {
     const parsedEntryId = Number(entryId);
     const parsedVatTrn = vatTrn.trim();
@@ -727,7 +818,12 @@ export const getInvoiceStatusTimeline = async (
     }
 
     try {
-        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, requestOptions);
+        const aigentrixOptions = await getAigentrixOptionsForSeller(parsedVatTrn, parsedOrganizationId);
+        if (!aigentrixOptions) {
+            return getApiKeyNotConfiguredResponse();
+        }
+
+        const result = await getAigentrixInvoiceStatusTimeline(parsedEntryId, aigentrixOptions);
 
         if (!result.success) {
             return {

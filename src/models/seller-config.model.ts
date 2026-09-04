@@ -3,6 +3,7 @@ import mongoose, { Schema } from "mongoose";
 export interface SellerConfigDocument extends mongoose.Document {
     organizationId: string;
     sellerVatTrn: number;
+    apiKey: string;
     companyId: number;
     participantId: string;
 }
@@ -18,6 +19,12 @@ const sellerConfigSchema = new Schema<SellerConfigDocument>(
             type: Number,
             required: true,
             index: true,
+        },
+        apiKey: {
+            type: String,
+            required: true,
+            trim: true,
+            select: false,
         },
         companyId: {
             type: Number,

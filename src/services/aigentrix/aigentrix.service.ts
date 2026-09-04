@@ -34,9 +34,9 @@ const parseResponse = (responseText: string): unknown => {
     }
 };
 
-const getRequiredHeaderValue = (value: string | undefined, headerName: string): string => {
+const getRequiredApiKey = (value: string | undefined): string => {
     if (!value?.trim()) {
-        throw new Error(`${headerName} is required in the request headers`);
+        throw new Error("Aigentrix API key is not configured");
     }
 
     return value.trim();
@@ -45,7 +45,7 @@ const getRequiredHeaderValue = (value: string | undefined, headerName: string): 
 export const resolveAigentrixRequestOptions = (
     options: AigentrixRequestOptions = {},
 ): Required<AigentrixRequestOptions> => ({
-    apiKey: getRequiredHeaderValue(options.apiKey, "X-API-KEY"),
+    apiKey: getRequiredApiKey(options.apiKey),
 });
 
 const getAigentrixHeaders = (options: Required<AigentrixRequestOptions>): Record<string, string> => ({

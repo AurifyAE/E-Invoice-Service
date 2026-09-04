@@ -13,6 +13,7 @@ import {
     validateInvoice,
 } from "../aigentrix/aigentrix.service.js";
 import type { AigentrixRequestOptions } from "../aigentrix/aigentrix.service.js";
+import { reserveProviderDocumentId } from "./invoice-number.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -22,6 +23,7 @@ export interface ServiceResponse {
 type LeanInvoiceSubmission = {
     organizationId?: string;
     documentId?: string;
+    providerDocumentId?: string;
     invoiceRef?: string;
     entryId?: number;
     status?: string;
@@ -343,8 +345,13 @@ export const createInvoiceSubmission = async (
 
         const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
+        const { providerDocumentId } = await reserveProviderDocumentId(parsedPayload.documentId);
+        const providerPayload: InvoiceSubmissionPayload = {
+            ...parsedPayload,
+            documentId: providerDocumentId,
+        };
 
-        const validationResult = await validateWithProvider(parsedPayload, aigentrixOptions);
+        const validationResult = await validateWithProvider(providerPayload, aigentrixOptions);
 
         if (!validationResult.success) {
             return {
@@ -353,6 +360,7 @@ export const createInvoiceSubmission = async (
                     success: false,
                     data: {
                         documentId: parsedPayload.documentId,
+                        providerDocumentId,
                         status: "VALIDATION_FAILED",
                         provider: "aigentrix",
                         providerError: {
@@ -370,13 +378,14 @@ export const createInvoiceSubmission = async (
             companyId: parsedPayload.companyId,
             invoiceRef: parsedPayload.invoiceRef,
             documentId: parsedPayload.documentId,
-            payload: parsedPayload,
+            providerDocumentId,
+            payload: providerPayload,
             status: "PENDING",
             provider: "aigentrix",
             providerValidationResponse: validationResult.data
         });
 
-        const providerResult = await submitToProvider(parsedPayload, aigentrixOptions);
+        const providerResult = await submitToProvider(providerPayload, aigentrixOptions);
 
         submission.status = providerResult.success ? "SUBMITTED" : "FAILED";
         submission.entryId = providerResult.success ? extractEntryId(providerResult.data) : undefined;
@@ -393,6 +402,7 @@ export const createInvoiceSubmission = async (
                     organizationId: submission.organizationId,
                     companyId: submission.companyId,
                     documentId: submission.documentId,
+                    providerDocumentId: submission.providerDocumentId,
                     entryId: submission.entryId,
                     invoiceRef: submission.invoiceRef,
                     status: submission.status,
@@ -482,7 +492,7 @@ export const getInvoiceDashboard = async (
                 .filter((documentId): documentId is string => Boolean(documentId))
         );
         const submissionsWithoutEntryData = submissions.filter((submission) => {
-            const documentId = submission.documentId ?? submission.payload?.documentId ?? "";
+            const documentId = submission.providerDocumentId ?? submission.payload?.documentId ?? "";
             return !successfulDocumentIds.has(documentId);
         });
         const totalInvoices = entryDatas.length + submissionsWithoutEntryData.length;

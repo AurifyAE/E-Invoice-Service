@@ -9,6 +9,7 @@ export interface ZatcaConfig {
     javaHome?: string;
     tempDir: string;
     initialPih?: string;
+    registrationScheme: string;
     timeoutMs: number;
 }
 
@@ -44,6 +45,9 @@ export const getZatcaConfig = (): ZatcaConfig => {
             "Set ZATCA_SDK_ROOT or set ZATCA_FATOORA_HOME, ZATCA_FATOORA_EXECUTABLE, and ZATCA_SDK_CONFIG",
         );
     }
+    if (!env.ZATCA_REGISTRATION_SCHEME) {
+        throw new ZatcaConfigurationError("ZATCA_REGISTRATION_SCHEME is required");
+    }
 
     return {
         sdkRoot: sdkRoot ?? path.dirname(path.dirname(fatooraHome)),
@@ -53,6 +57,7 @@ export const getZatcaConfig = (): ZatcaConfig => {
         javaHome: env.ZATCA_JAVA_HOME ? path.resolve(env.ZATCA_JAVA_HOME) : undefined,
         tempDir: path.resolve(env.ZATCA_TEMP_DIR ?? path.join("/tmp", "zatca")),
         initialPih: env.ZATCA_INITIAL_PIH,
+        registrationScheme: env.ZATCA_REGISTRATION_SCHEME,
         timeoutMs: env.ZATCA_SDK_TIMEOUT_MS,
     };
 };

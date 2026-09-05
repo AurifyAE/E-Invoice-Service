@@ -23,6 +23,7 @@ const envSchema = z.object({
     ZATCA_JAVA_HOME: z.string().min(1).optional(),
     ZATCA_TEMP_DIR: z.string().min(1).optional(),
     ZATCA_INITIAL_PIH: z.string().min(1).optional(),
+    ZATCA_REGISTRATION_SCHEME: z.string().trim().min(1).optional(),
     ZATCA_SDK_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 });
 

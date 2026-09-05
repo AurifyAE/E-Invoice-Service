@@ -1,5 +1,5 @@
 import type { ZatcaSaleInvoiceRequest } from "../../schemas/zatca-sale-invoice.schema.js";
-import { ZATCA_SELLER_REGISTRATION } from "../../types/zatca/zatcaSaleInvoice.types.js";
+import { getZatcaConfig } from "../../config/zatca.config.js";
 
 const SCALE = 1_000_000n;
 const MONEY_TOLERANCE = 10_000n; // 0.01 at the six-decimal working scale
@@ -108,12 +108,12 @@ export const validateZatcaInvoiceTotals = (invoice: ZatcaSaleInvoiceRequest): vo
     if (!isClose(toScaled(invoice.totals.taxInclusiveAmount), toScaled(invoice.totals.taxExclusiveAmount) + toScaled(invoice.tax.taxAmount))) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.taxInclusiveAmount does not equal taxExclusiveAmount + taxAmount");
     }
-    if (!isClose(toScaled(invoice.totals.payableAmount), toScaled(invoice.totals.taxInclusiveAmount) - toScaled(invoice.totals.prepaidAmount))) {
+    if (invoice.totals.prepaidAmount !== undefined && !isClose(toScaled(invoice.totals.payableAmount), toScaled(invoice.totals.taxInclusiveAmount) - toScaled(invoice.totals.prepaidAmount))) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.payableAmount does not reconcile with taxInclusiveAmount - prepaidAmount");
     }
 
     const expectedAllowanceTotal = invoice.allowance && !invoice.allowance.chargeIndicator ? allowanceAmount : 0n;
-    if (!isClose(toScaled(invoice.totals.allowanceTotalAmount), expectedAllowanceTotal)) {
+    if (invoice.totals.allowanceTotalAmount !== undefined && !isClose(toScaled(invoice.totals.allowanceTotalAmount), expectedAllowanceTotal)) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.allowanceTotalAmount does not reconcile with the allowance");
     }
 
@@ -139,6 +139,7 @@ export const createSimplifiedInvoiceXml = (
     invoice: ZatcaSaleInvoiceRequest,
     state: ZatcaXmlState,
 ): string => {
+    const { registrationScheme } = getZatcaConfig();
     const currency = xmlEscape(invoice.currency);
     const note = invoice.note ? `<cbc:Note>${xmlEscape(invoice.note)}</cbc:Note>` : "";
     const isCreditNote = invoice.transactionType === "CREDIT_NOTE";
@@ -209,8 +210,8 @@ export const createSimplifiedInvoiceXml = (
   <cac:AdditionalDocumentReference><cbc:ID>QR</cbc:ID><cac:Attachment><cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain"/></cac:Attachment></cac:AdditionalDocumentReference>
   <cac:Signature><cbc:ID>urn:oasis:names:specification:ubl:signature:Invoice</cbc:ID><cbc:SignatureMethod>urn:oasis:names:specification:ubl:dsig:enveloped:xades</cbc:SignatureMethod></cac:Signature>
   <cac:AccountingSupplierParty><cac:Party>
-    <cac:PartyIdentification><cbc:ID schemeID="${ZATCA_SELLER_REGISTRATION.scheme}">${ZATCA_SELLER_REGISTRATION.id}</cbc:ID></cac:PartyIdentification>
-    <cac:PostalAddress><cbc:StreetName>${xmlEscape(invoice.seller.streetName)}</cbc:StreetName><cbc:BuildingNumber>${ZATCA_SELLER_REGISTRATION.buildingNumber}</cbc:BuildingNumber><cbc:CitySubdivisionName>${xmlEscape(invoice.seller.district)}</cbc:CitySubdivisionName><cbc:CityName>${xmlEscape(invoice.seller.city)}</cbc:CityName><cbc:PostalZone>${xmlEscape(invoice.seller.postalCode)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${xmlEscape(invoice.seller.countryCode)}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    <cac:PartyIdentification><cbc:ID schemeID="${xmlEscape(registrationScheme)}">${xmlEscape(invoice.seller.registrationId)}</cbc:ID></cac:PartyIdentification>
+    <cac:PostalAddress><cbc:StreetName>${xmlEscape(invoice.seller.streetName)}</cbc:StreetName><cbc:BuildingNumber>${xmlEscape(invoice.seller.buildingNumber)}</cbc:BuildingNumber><cbc:CitySubdivisionName>${xmlEscape(invoice.seller.district)}</cbc:CitySubdivisionName><cbc:CityName>${xmlEscape(invoice.seller.city)}</cbc:CityName><cbc:PostalZone>${xmlEscape(invoice.seller.postalCode)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${xmlEscape(invoice.seller.countryCode)}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
     <cac:PartyTaxScheme><cbc:CompanyID>${xmlEscape(invoice.seller.vatNumber)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>
     <cac:PartyLegalEntity><cbc:RegistrationName>${xmlEscape(invoice.seller.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
   </cac:Party></cac:AccountingSupplierParty>
@@ -224,8 +225,8 @@ export const createSimplifiedInvoiceXml = (
     <cbc:LineExtensionAmount currencyID="${currency}">${money(invoice.totals.lineExtensionAmount)}</cbc:LineExtensionAmount>
     <cbc:TaxExclusiveAmount currencyID="${currency}">${money(invoice.totals.taxExclusiveAmount)}</cbc:TaxExclusiveAmount>
     <cbc:TaxInclusiveAmount currencyID="${currency}">${money(invoice.totals.taxInclusiveAmount)}</cbc:TaxInclusiveAmount>
-    <cbc:AllowanceTotalAmount currencyID="${currency}">${money(invoice.totals.allowanceTotalAmount)}</cbc:AllowanceTotalAmount>
-    <cbc:PrepaidAmount currencyID="${currency}">${money(invoice.totals.prepaidAmount)}</cbc:PrepaidAmount>
+    ${invoice.totals.allowanceTotalAmount !== undefined ? `<cbc:AllowanceTotalAmount currencyID="${currency}">${money(invoice.totals.allowanceTotalAmount)}</cbc:AllowanceTotalAmount>` : ""}
+    ${invoice.totals.prepaidAmount !== undefined ? `<cbc:PrepaidAmount currencyID="${currency}">${money(invoice.totals.prepaidAmount)}</cbc:PrepaidAmount>` : ""}
     <cbc:PayableAmount currencyID="${currency}">${money(invoice.totals.payableAmount)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>
   ${lines}

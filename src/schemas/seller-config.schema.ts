@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const sellerVatTrnSchema = z.coerce.number().int().positive("sellerVatTrn must be a positive number");
+const apiKeySchema = z.string().trim().min(1, "apiKey is required");
 const companyIdSchema = z.coerce.number().int().positive("companyId must be a positive number");
 const participantIdSchema = z
     .string()
@@ -24,17 +25,19 @@ const normalizeOrganizationId = (payload: unknown) => {
 export const createSellerConfigSchema = z.preprocess(normalizeOrganizationId, z.object({
     organizationId: organizationIdSchema,
     sellerVatTrn: sellerVatTrnSchema,
+    apiKey: apiKeySchema,
     companyId: companyIdSchema,
     participantId: participantIdSchema,
 }));
 
 export const updateSellerConfigSchema = z.object({
+    apiKey: apiKeySchema.optional(),
     companyId: companyIdSchema.optional(),
     participantId: participantIdSchema.optional(),
 }).refine(
-    (payload) => payload.companyId !== undefined || payload.participantId !== undefined,
+    (payload) => payload.apiKey !== undefined || payload.companyId !== undefined || payload.participantId !== undefined,
     {
-        message: "At least one of companyId or participantId is required",
+        message: "At least one of apiKey, companyId or participantId is required",
     },
 );
 

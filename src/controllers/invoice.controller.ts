@@ -5,11 +5,6 @@ import {
     getInvoiceEntry,
     getInvoiceStatusTimeline,
 } from "../services/invoice/invoice.service.js";
-import type { AigentrixRequestOptions } from "../services/aigentrix/aigentrix.service.js";
-
-const getAigentrixRequestOptions = (req: Request): AigentrixRequestOptions => ({
-    apiKey: req.get("X-API-KEY")?.trim() || undefined,
-});
 
 const getOrganizationId = (req: Request): string => {
     const organizationId = req.query.organizationId ?? req.query.OrganizationId;
@@ -17,7 +12,7 @@ const getOrganizationId = (req: Request): string => {
 };
 
 export const submitInvoice = async (req: Request, res: Response) => {
-    const result = await createInvoiceSubmission(req.body, getAigentrixRequestOptions(req));
+    const result = await createInvoiceSubmission(req.body);
     return res.status(result.statusCode).json(result.body);
 };
 
@@ -27,7 +22,6 @@ export const getInvoice = async (req: Request, res: Response) => {
         String(req.params.entryId),
         vatTrn,
         getOrganizationId(req),
-        getAigentrixRequestOptions(req),
     );
     return res.status(result.statusCode).json(result.body);
 };
@@ -44,7 +38,6 @@ export const getInvoiceTimeline = async (req: Request, res: Response) => {
         String(req.params.entryId),
         vatTrn,
         getOrganizationId(req),
-        getAigentrixRequestOptions(req),
     );
     return res.status(result.statusCode).json(result.body);
 };

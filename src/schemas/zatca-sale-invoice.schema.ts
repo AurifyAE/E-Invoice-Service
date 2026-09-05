@@ -9,6 +9,7 @@ const positiveDecimal = decimalValue.refine((value) => Number(value) > 0, "Must 
 const nonNegativeDecimal = decimalValue.refine((value) => Number(value) >= 0, "Must be non-negative");
 
 const vatCategorySchema = z.string().trim().min(1).max(3);
+const defaultPaymentMeansCode = "10";
 
 const sellerSchema = z.object({
     registrationId: z.string().trim().min(1),
@@ -50,8 +51,8 @@ const totalsSchema = z.object({
     lineExtensionAmount: nonNegativeDecimal,
     taxExclusiveAmount: nonNegativeDecimal,
     taxInclusiveAmount: nonNegativeDecimal,
-    allowanceTotalAmount: nonNegativeDecimal,
-    prepaidAmount: nonNegativeDecimal,
+    allowanceTotalAmount: nonNegativeDecimal.optional(),
+    prepaidAmount: nonNegativeDecimal.optional(),
     payableAmount: nonNegativeDecimal,
 }).strict();
 
@@ -85,7 +86,7 @@ export const zatcaSaleInvoiceSchema = z.object({
     note: z.string().trim().max(1_000).optional(),
     seller: sellerSchema,
     buyer: buyerSchema.optional(),
-    paymentMeansCode: z.string().trim().min(1),
+    paymentMeansCode: z.string().trim().min(1).default(defaultPaymentMeansCode),
     allowance: allowanceSchema.optional(),
     tax: taxSchema,
     totals: totalsSchema,

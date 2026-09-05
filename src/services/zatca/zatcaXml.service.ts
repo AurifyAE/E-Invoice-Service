@@ -108,12 +108,12 @@ export const validateZatcaInvoiceTotals = (invoice: ZatcaSaleInvoiceRequest): vo
     if (!isClose(toScaled(invoice.totals.taxInclusiveAmount), toScaled(invoice.totals.taxExclusiveAmount) + toScaled(invoice.tax.taxAmount))) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.taxInclusiveAmount does not equal taxExclusiveAmount + taxAmount");
     }
-    if (!isClose(toScaled(invoice.totals.payableAmount), toScaled(invoice.totals.taxInclusiveAmount) - toScaled(invoice.totals.prepaidAmount))) {
+    if (invoice.totals.prepaidAmount !== undefined && !isClose(toScaled(invoice.totals.payableAmount), toScaled(invoice.totals.taxInclusiveAmount) - toScaled(invoice.totals.prepaidAmount))) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.payableAmount does not reconcile with taxInclusiveAmount - prepaidAmount");
     }
 
     const expectedAllowanceTotal = invoice.allowance && !invoice.allowance.chargeIndicator ? allowanceAmount : 0n;
-    if (!isClose(toScaled(invoice.totals.allowanceTotalAmount), expectedAllowanceTotal)) {
+    if (invoice.totals.allowanceTotalAmount !== undefined && !isClose(toScaled(invoice.totals.allowanceTotalAmount), expectedAllowanceTotal)) {
         throw new ZatcaInvoiceTotalsMismatchError("totals.allowanceTotalAmount does not reconcile with the allowance");
     }
 
@@ -225,8 +225,8 @@ export const createSimplifiedInvoiceXml = (
     <cbc:LineExtensionAmount currencyID="${currency}">${money(invoice.totals.lineExtensionAmount)}</cbc:LineExtensionAmount>
     <cbc:TaxExclusiveAmount currencyID="${currency}">${money(invoice.totals.taxExclusiveAmount)}</cbc:TaxExclusiveAmount>
     <cbc:TaxInclusiveAmount currencyID="${currency}">${money(invoice.totals.taxInclusiveAmount)}</cbc:TaxInclusiveAmount>
-    <cbc:AllowanceTotalAmount currencyID="${currency}">${money(invoice.totals.allowanceTotalAmount)}</cbc:AllowanceTotalAmount>
-    <cbc:PrepaidAmount currencyID="${currency}">${money(invoice.totals.prepaidAmount)}</cbc:PrepaidAmount>
+    ${invoice.totals.allowanceTotalAmount !== undefined ? `<cbc:AllowanceTotalAmount currencyID="${currency}">${money(invoice.totals.allowanceTotalAmount)}</cbc:AllowanceTotalAmount>` : ""}
+    ${invoice.totals.prepaidAmount !== undefined ? `<cbc:PrepaidAmount currencyID="${currency}">${money(invoice.totals.prepaidAmount)}</cbc:PrepaidAmount>` : ""}
     <cbc:PayableAmount currencyID="${currency}">${money(invoice.totals.payableAmount)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>
   ${lines}

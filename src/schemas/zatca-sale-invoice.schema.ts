@@ -11,9 +11,11 @@ const nonNegativeDecimal = decimalValue.refine((value) => Number(value) >= 0, "M
 const vatCategorySchema = z.string().trim().min(1).max(3);
 
 const sellerSchema = z.object({
+    registrationId: z.string().trim().min(1),
     name: z.string().trim().min(1),
     vatNumber: z.string().trim().min(1),
     streetName: z.string().trim().min(1),
+    buildingNumber: z.string().trim().min(1),
     district: z.string().trim().min(1),
     city: z.string().trim().min(1),
     postalCode: z.string().trim().min(1),

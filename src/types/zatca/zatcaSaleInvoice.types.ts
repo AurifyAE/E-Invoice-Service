@@ -3,14 +3,6 @@ export const ZATCA_PARTY_BUSINESS_TYPE = {
     B2B: "B2B",
 } as const;
 
-// Phase 1 EGS seller registration. This is integration configuration owned by
-// the service, not business data supplied by ERP.
-export const ZATCA_SELLER_REGISTRATION = {
-    id: "1010010000",
-    scheme: "CRN",
-    buildingNumber: "2322",
-} as const;
-
 export type ZatcaPartyBusinessType = typeof ZATCA_PARTY_BUSINESS_TYPE[keyof typeof ZATCA_PARTY_BUSINESS_TYPE];
 
 export const ZATCA_TRANSACTION_TYPE = {

@@ -135,6 +135,30 @@ export const createFullInvoice = async (
     return postToAigentrix(buildUrl("/external/api/v1/eInvoiceEntry/createFull"), payload, false, false, requestOptions);
 };
 
+export const getInboundInvoiceSummary = async (
+    companyId: number,
+    startDate: string,
+    endDate: string,
+    requestOptions: AigentrixRequestOptions,
+): Promise<{ count: number; amount: number }> => {
+    const url = new URL(buildUrl("/external/api/v1/eInvoiceEntry"));
+    url.search = new URLSearchParams({
+        companyId: String(companyId), startDate, endDate, type: env.TYPE_INBOUND,
+    }).toString();
+    const response = await fetch(url, {
+        headers: getAigentrixHeaders(resolveAigentrixRequestOptions(requestOptions)),
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`Inbound invoice request failed (${response.status})`);
+    const data = await response.json() as { success?: boolean; meta?: { totalCount?: number; totalAmount?: number } };
+    const count = data.meta?.totalCount;
+    const amount = data.meta?.totalAmount;
+    if (data.success === false || typeof count !== "number" || typeof amount !== "number") {
+        throw new Error("Inbound invoice response is missing valid totalCount or totalAmount");
+    }
+    return { count, amount };
+};
+
 export const getInvoiceEntry = async (
     entryId: number,
     requestOptions?: AigentrixRequestOptions,

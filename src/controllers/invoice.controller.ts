@@ -28,7 +28,8 @@ export const getInvoice = async (req: Request, res: Response) => {
 
 export const getDashboard = async (req: Request, res: Response) => {
     const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
-    const result = await getInvoiceDashboard(vatTrn, getOrganizationId(req));
+    const startDate = typeof req.query.startDate === "string" ? req.query.startDate : "";
+    const result = await getInvoiceDashboard(vatTrn, getOrganizationId(req), startDate);
     return res.status(result.statusCode).json(result.body);
 };
 

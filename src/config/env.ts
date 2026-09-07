@@ -6,6 +6,7 @@ dotenv.config();
 const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(6060),
+    TYPE_INBOUND: z.literal('INBOUND').default('INBOUND'),
     CORS_ORIGIN: z.string().min(1, 'CORS_ORIGIN is required').default('http://localhost:5173'),
     MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
     AIGENTRIX_BASE_URL: z.string().min(1, 'AIGENTRIX_BASE_URL is required'),

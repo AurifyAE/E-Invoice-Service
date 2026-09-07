@@ -8,6 +8,7 @@ import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
 import {
     createFullInvoice,
+    getInboundInvoiceSummary,
     getInvoiceEntry as getAigentrixInvoiceEntry,
     getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
     validateInvoice,
@@ -489,6 +490,7 @@ export const createInvoiceSubmission = async (
 export const getInvoiceDashboard = async (
     vatTrn: string,
     organizationId: string,
+    startDate: string = "",
 ): Promise<ServiceResponse> => {
     const parsedVatTrn = vatTrn.trim();
     const parsedOrganizationId = organizationId.trim();
@@ -520,15 +522,30 @@ export const getInvoiceDashboard = async (
     }
 
     try {
+        const endDate = new Date().toISOString().slice(0, 10);
+        const parsedDate = new Date(`${startDate}T00:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(parsedDate.getTime())
+            || parsedDate.toISOString().slice(0, 10) !== startDate || startDate > endDate) {
+            return { statusCode: 400, body: { success: false, error: {
+                code: "INVALID_START_DATE", message: "Branch opening date (startDate) must be a valid YYYY-MM-DD date no later than today",
+            } } };
+        }
+        const sellerConfig = await SellerConfigModel.findOne({
+            organizationId: parsedOrganizationId, sellerVatTrn: Number(parsedVatTrn),
+        }).select("companyId +apiKey").lean();
+        if (!sellerConfig?.apiKey?.trim()) return getApiKeyNotConfiguredResponse();
+        if (!sellerConfig.companyId) throw new Error("Company ID is required in seller configuration to load inbound invoices");
+
         const submissionFilter = {
             organizationId: parsedOrganizationId,
             "payload.sellerVatTrn": parsedVatTrn,
         };
         const entryDataFilter = { organizationId: parsedOrganizationId, vatTrn: parsedVatTrn };
 
-        const [submissions, entryDatas] = await Promise.all([
+        const [submissions, entryDatas, inboundSummary] = await Promise.all([
             InvoiceSubmissionModel.find(submissionFilter).sort({ updatedAt: -1 }).lean<LeanInvoiceSubmission[]>(),
             EntryDataModel.find(entryDataFilter).sort({ updatedAt: -1 }).lean<LeanEntryData[]>(),
+            getInboundInvoiceSummary(sellerConfig.companyId, startDate, endDate, { apiKey: sellerConfig.apiKey }),
         ]);
 
         const successfulDocumentIds = new Set(
@@ -633,10 +650,7 @@ export const getInvoiceDashboard = async (
                             count: totalOutbound,
                             amount: totalAmount,
                         },
-                        inbound: {
-                            count: totalInbound,
-                            amount: roundAmount(inboundEntries.reduce((sum, entry) => sum + (Number(entry.entryData?.payableAmount) || 0), 0)),
-                        },
+                        inbound: inboundSummary,
                         totalAmount,
                         totalVat,
                         successRate,

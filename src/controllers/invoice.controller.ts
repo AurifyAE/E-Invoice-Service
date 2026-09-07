@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
     createInvoiceSubmission,
+    getInboundInvoices,
     getInvoiceDashboard,
     getInvoiceEntry,
     getInvoiceStatusTimeline,
@@ -30,6 +31,25 @@ export const getDashboard = async (req: Request, res: Response) => {
     const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
     const startDate = typeof req.query.startDate === "string" ? req.query.startDate : "";
     const result = await getInvoiceDashboard(vatTrn, getOrganizationId(req), startDate);
+    return res.status(result.statusCode).json(result.body);
+};
+
+export const getInbound = async (req: Request, res: Response) => {
+    const vatTrn = typeof req.query.vatTrn === "string" ? req.query.vatTrn : "";
+    const startDate = typeof req.query.startDate === "string" ? req.query.startDate : "";
+    const endDate = typeof req.query.endDate === "string" ? req.query.endDate : "";
+    const searchString = typeof req.query.searchString === "string" ? req.query.searchString : "";
+    const page = Number(req.query.page ?? 1);
+    const perPage = Number(req.query.perPage ?? 10);
+    const result = await getInboundInvoices(
+        vatTrn,
+        getOrganizationId(req),
+        startDate,
+        endDate,
+        searchString,
+        page,
+        perPage,
+    );
     return res.status(result.statusCode).json(result.body);
 };
 

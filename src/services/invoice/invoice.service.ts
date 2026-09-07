@@ -8,6 +8,8 @@ import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
 import {
     createFullInvoice,
+    getInboundInvoiceEntries,
+    getInboundInvoiceSummary,
     getInvoiceEntry as getAigentrixInvoiceEntry,
     getInvoiceStatusTimeline as getAigentrixInvoiceStatusTimeline,
     validateInvoice,
@@ -489,6 +491,7 @@ export const createInvoiceSubmission = async (
 export const getInvoiceDashboard = async (
     vatTrn: string,
     organizationId: string,
+    startDate: string = "",
 ): Promise<ServiceResponse> => {
     const parsedVatTrn = vatTrn.trim();
     const parsedOrganizationId = organizationId.trim();
@@ -520,15 +523,30 @@ export const getInvoiceDashboard = async (
     }
 
     try {
+        const endDate = new Date().toISOString().slice(0, 10);
+        const parsedDate = new Date(`${startDate}T00:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(parsedDate.getTime())
+            || parsedDate.toISOString().slice(0, 10) !== startDate || startDate > endDate) {
+            return { statusCode: 400, body: { success: false, error: {
+                code: "INVALID_START_DATE", message: "Branch opening date (startDate) must be a valid YYYY-MM-DD date no later than today",
+            } } };
+        }
+        const sellerConfig = await SellerConfigModel.findOne({
+            organizationId: parsedOrganizationId, sellerVatTrn: Number(parsedVatTrn),
+        }).select("companyId +apiKey").lean();
+        if (!sellerConfig?.apiKey?.trim()) return getApiKeyNotConfiguredResponse();
+        if (!sellerConfig.companyId) throw new Error("Company ID is required in seller configuration to load inbound invoices");
+
         const submissionFilter = {
             organizationId: parsedOrganizationId,
             "payload.sellerVatTrn": parsedVatTrn,
         };
         const entryDataFilter = { organizationId: parsedOrganizationId, vatTrn: parsedVatTrn };
 
-        const [submissions, entryDatas] = await Promise.all([
+        const [submissions, entryDatas, inboundSummary] = await Promise.all([
             InvoiceSubmissionModel.find(submissionFilter).sort({ updatedAt: -1 }).lean<LeanInvoiceSubmission[]>(),
             EntryDataModel.find(entryDataFilter).sort({ updatedAt: -1 }).lean<LeanEntryData[]>(),
+            getInboundInvoiceSummary(sellerConfig.companyId, startDate, endDate, { apiKey: sellerConfig.apiKey }),
         ]);
 
         const successfulDocumentIds = new Set(
@@ -633,10 +651,7 @@ export const getInvoiceDashboard = async (
                             count: totalOutbound,
                             amount: totalAmount,
                         },
-                        inbound: {
-                            count: totalInbound,
-                            amount: roundAmount(inboundEntries.reduce((sum, entry) => sum + (Number(entry.entryData?.payableAmount) || 0), 0)),
-                        },
+                        inbound: inboundSummary,
                         totalAmount,
                         totalVat,
                         successRate,
@@ -666,6 +681,80 @@ export const getInvoiceDashboard = async (
                     message: error instanceof Error ? error.message : "Failed to fetch invoice dashboard data",
                 },
             },
+        };
+    }
+};
+
+export const getInboundInvoices = async (
+    vatTrn: string,
+    organizationId: string,
+    startDate: string,
+    endDate: string,
+    searchString: string,
+    page: number,
+    perPage: number,
+): Promise<ServiceResponse> => {
+    const parsedVatTrn = vatTrn.trim();
+    const parsedOrganizationId = organizationId.trim();
+    const today = new Date().toISOString().slice(0, 10);
+    const parsedEndDate = endDate.trim() || today;
+    const parsedSearchString = searchString.trim();
+
+    if (!parsedVatTrn) return { statusCode: 400, body: { success: false, error: { code: "VAT_TRN_REQUIRED", message: "vatTrn is required" } } };
+    if (!parsedOrganizationId) return { statusCode: 400, body: { success: false, error: { code: "ORGANIZATION_ID_REQUIRED", message: "organizationId is required" } } };
+    const parsedStartDate = new Date(`${startDate}T00:00:00Z`);
+    const parsedEndDateValue = new Date(`${parsedEndDate}T00:00:00Z`);
+    if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(startDate)
+        || !Number.isFinite(parsedStartDate.getTime())
+        || parsedStartDate.toISOString().slice(0, 10) !== startDate
+        || !/^\d{4}-\d{2}-\d{2}$/.test(parsedEndDate)
+        || !Number.isFinite(parsedEndDateValue.getTime())
+        || parsedEndDateValue.toISOString().slice(0, 10) !== parsedEndDate
+        || startDate > parsedEndDate
+        || parsedEndDate > today
+    ) {
+        return { statusCode: 400, body: { success: false, error: { code: "INVALID_DATE_RANGE", message: "startDate and endDate must be valid YYYY-MM-DD dates, with startDate on or before endDate and endDate no later than today" } } };
+    }
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(perPage) || perPage < 1 || perPage > 100) {
+        return { statusCode: 400, body: { success: false, error: { code: "INVALID_PAGINATION", message: "page must be at least 1 and perPage must be between 1 and 100" } } };
+    }
+
+    try {
+        const sellerConfig = await SellerConfigModel.findOne({
+            organizationId: parsedOrganizationId,
+            sellerVatTrn: Number(parsedVatTrn),
+        }).select("companyId +apiKey").lean();
+        if (!sellerConfig?.apiKey?.trim()) return getApiKeyNotConfiguredResponse();
+        if (!sellerConfig.companyId) throw new Error("Company ID is required in seller configuration to load inbound invoices");
+
+        const inbound = await getInboundInvoiceEntries(
+            sellerConfig.companyId,
+            startDate,
+            parsedEndDate,
+            parsedSearchString,
+            page - 1,
+            perPage,
+            { apiKey: sellerConfig.apiKey },
+        );
+        return {
+            statusCode: 200,
+            body: {
+                success: true,
+                data: inbound.entries,
+                pagination: {
+                    page: inbound.page + 1,
+                    perPage: inbound.perPage,
+                    totalItems: inbound.totalCount,
+                    totalPages: Math.max(Math.ceil(inbound.totalCount / inbound.perPage), 1),
+                    hasNext: (inbound.page + 1) * inbound.perPage < inbound.totalCount,
+                },
+            },
+        };
+    } catch (error) {
+        return {
+            statusCode: 502,
+            body: { success: false, error: { code: "AIGENTRIX_INBOUND_FETCH_FAILED", message: error instanceof Error ? error.message : "Failed to fetch inbound invoices" } },
         };
     }
 };

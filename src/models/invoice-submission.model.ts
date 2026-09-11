@@ -107,7 +107,7 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
 );
 
 invoiceSubmissionSchema.index(
-    { companyId: 1, documentId: 1 },
+    { organizationId: 1, documentId: 1 },
     { unique: true },
 );
 

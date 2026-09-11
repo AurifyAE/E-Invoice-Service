@@ -47,7 +47,7 @@ const invoicePayloadSchema = new Schema(
         organizationId: { type: String, required: true },
         companyId: { type: String, required: true },
         supplierParticipantId: { type: String, required: true },
-        customerParticipantId: { type: String, required: true },
+        customerParticipantId: { type: String },
         invoiceRef: { type: String },
         documentId: { type: String, required: true },
         status: { type: String, required: true },
@@ -63,13 +63,13 @@ const invoicePayloadSchema = new Schema(
         sellerCity: { type: String, required: true },
         sellerCountrySubdivision: { type: String },
         sellerCountryCode: { type: String, required: true },
-        buyerName: { type: String, required: true },
-        buyerVatTrn: { type: String, required: true },
+        buyerName: { type: String },
+        buyerVatTrn: { type: String },
         buyerRegisteredName: { type: String },
-        buyerAddressLine1: { type: String, required: true },
-        buyerCity: { type: String, required: true },
+        buyerAddressLine1: { type: String },
+        buyerCity: { type: String },
         buyerCountrySubdivision: { type: String },
-        buyerCountryCode: { type: String, required: true },
+        buyerCountryCode: { type: String },
         lineExtensionTotal: { type: Number, required: true },
         taxAmount: { type: Number, required: true },
         totalIncludingTax: { type: Number, required: true },
@@ -107,8 +107,8 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
 );
 
 invoiceSubmissionSchema.index(
-    { organizationId: 1, documentId: 1 },
-    { unique: true, partialFilterExpression: { organizationId: { $exists: true } } },
+    { companyId: 1, documentId: 1 },
+    { unique: true },
 );
 
 export const InvoiceSubmissionModel = mongoose.model<InvoiceSubmissionDocument>(

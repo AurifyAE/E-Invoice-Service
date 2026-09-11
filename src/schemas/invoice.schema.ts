@@ -124,11 +124,21 @@ const getEmirateSubdivision = (city: string): string | undefined => {
     return emirateSubdivisionByCity[city.trim().toLowerCase()];
 };
 
-export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.object({
+const uaeRegisteredBuyerFields = [
+    "buyerName",
+    "buyerVatTrn",
+    "buyerAddressLine1",
+    "buyerCity",
+    "buyerCountryCode",
+    "customerParticipantId",
+] as const;
+
+const invoiceSubmissionPayloadSchema = z.object({
     organizationId: z.string().trim().min(1, "organizationId is required"),
     companyId: z.string().min(1, "companyId is required"),
     supplierParticipantId: z.string().min(1, "supplierParticipantId is required"),
-    customerParticipantId: z.string().trim().min(1, "customerParticipantId is required"),
+    customerParticipantId: z.string().trim().optional(),
+    buyerVatRegistered: z.boolean().optional(),
     invoiceRef: z.string().optional(),
     documentId: z.string().min(1, "documentId is required"),
     status: z.string().min(1, "status is required"),
@@ -144,25 +154,45 @@ export const invoiceSubmissionSchema = z.preprocess(normalizeInvoicePayload, z.o
     sellerCity: z.string().min(1, "sellerCity is required"),
     sellerCountrySubdivision: z.string().optional(),
     sellerCountryCode: z.string().min(1, "sellerCountryCode is required"),
-    buyerName: z.string().min(1, "buyerName is required"),
-    buyerVatTrn: z.string().min(1, "buyerVatTrn is required"),
+    buyerName: z.string().trim().optional(),
+    buyerVatTrn: z.string().trim().optional(),
     buyerRegisteredName: z.string().optional(),
-    buyerAddressLine1: z.string().min(1, "buyerAddressLine1 is required"),
-    buyerCity: z.string().min(1, "buyerCity is required"),
+    buyerAddressLine1: z.string().trim().optional(),
+    buyerCity: z.string().trim().optional(),
     buyerCountrySubdivision: z.string().optional(),
-    buyerCountryCode: z.string().min(1, "buyerCountryCode is required"),
+    buyerCountryCode: z.string().trim().optional(),
     lineExtensionTotal: z.coerce.number().nonnegative(),
     taxAmount: z.coerce.number().nonnegative(),
     totalIncludingTax: z.coerce.number().nonnegative(),
     payableAmount: z.coerce.number().nonnegative(),
     payments: z.array(paymentSchema).optional(),
     lines: z.array(invoiceLineSchema).min(1, "At least one invoice line is required"),
-}).transform((invoice) => ({
+}).superRefine((invoice, context) => {
+    if (invoice.buyerVatRegistered !== true) {
+        return;
+    }
+
+    uaeRegisteredBuyerFields.forEach((field) => {
+        if (!invoice[field]) {
+            context.addIssue({
+                code: "custom",
+                path: [field],
+                message: `${field} is required for UAE VAT-registered buyers`,
+            });
+        }
+    });
+}).transform(({ buyerVatRegistered: _buyerVatRegistered, ...invoice }) => ({
     ...invoice,
     ...(invoice.creditNoteReasonCode ? {} : { payments: invoice.payments ?? [{ paymentMeansCode: "30" }] }),
     buyerRegisteredName: invoice.buyerRegisteredName?.trim() || invoice.buyerName,
     sellerCountrySubdivision: invoice.sellerCountrySubdivision ?? getEmirateSubdivision(invoice.sellerCity),
-    buyerCountrySubdivision: invoice.buyerCountrySubdivision ?? getEmirateSubdivision(invoice.buyerCity),
-})));
+    buyerCountrySubdivision: invoice.buyerCountrySubdivision
+        ?? (invoice.buyerCity ? getEmirateSubdivision(invoice.buyerCity) : undefined),
+}));
+
+export const invoiceSubmissionSchema = z.preprocess(
+    normalizeInvoicePayload,
+    invoiceSubmissionPayloadSchema,
+);
 
 export type InvoiceSubmissionPayload = z.infer<typeof invoiceSubmissionSchema>;

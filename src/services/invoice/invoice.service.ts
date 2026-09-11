@@ -3,10 +3,12 @@ import { env } from "../../config/env.js";
 import { EntryDataModel } from "../../models/entry-data.model.js";
 import { EntryStatusTimelineModel } from "../../models/entry-status-timeline.model.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
+import type { InvoiceSubmissionDocument } from "../../models/invoice-submission.model.js";
 import { SellerConfigModel } from "../../models/seller-config.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
 import {
+    buildAigentrixInvoiceRequestBody,
     createFullInvoice,
     getInboundInvoiceEntries,
     getInboundInvoiceSummary,
@@ -16,6 +18,8 @@ import {
 } from "../aigentrix/aigentrix.service.js";
 import type { AigentrixRequestOptions } from "../aigentrix/aigentrix.service.js";
 import { reserveProviderDocumentId } from "./invoice-number.service.js";
+import { reconcileSaleInvoicePayload } from "./invoice-money.service.js";
+import { saveInvoiceSubmissionXmlOnce } from "./invoice-xml.service.js";
 
 export interface ServiceResponse {
     statusCode: number;
@@ -215,7 +219,7 @@ const getApiKeyNotConfiguredResponse = (): ServiceResponse => ({
         success: false,
         error: {
             code: "AIGENTRIX_API_KEY_NOT_CONFIGURED",
-            message: "Before using E-Invoice, save the Aigentrix API key in seller configuration.",
+            message: "Before using E-Invoice, save the API Key, Company ID and Participant ID in E-Invoice Configuration.",
         },
     },
 });
@@ -287,6 +291,35 @@ const upsertEntryStatusTimelineData = async (
     );
 };
 
+const storeSubmissionXmlIfAvailable = async (submission: InvoiceSubmissionDocument): Promise<void> => {
+    if (submission.status !== "SUBMITTED" || submission.entryId === undefined) {
+        return;
+    }
+
+    await saveInvoiceSubmissionXmlOnce({
+        organizationId: submission.organizationId,
+        entryId: submission.entryId,
+        documentId: submission.documentId,
+        providerDocumentId: submission.providerDocumentId,
+        vatTrn: submission.payload.sellerVatTrn,
+        requestBody: buildAigentrixInvoiceRequestBody(submission.payload),
+    });
+};
+
+const buildSubmissionResponseData = (submission: InvoiceSubmissionDocument) => ({
+    organizationId: submission.organizationId,
+    companyId: submission.companyId,
+    documentId: submission.documentId,
+    providerDocumentId: submission.providerDocumentId,
+    entryId: submission.entryId,
+    invoiceRef: submission.invoiceRef,
+    status: submission.status,
+    provider: submission.provider,
+    providerValidationResponse: submission.providerValidationResponse,
+    providerResponse: submission.providerResponse,
+    providerError: submission.providerError,
+});
+
 const roundAmount = (amount: number): number => {
     return Math.round(amount * 100) / 100;
 };
@@ -347,10 +380,37 @@ export const createInvoiceSubmission = async (
 
         const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
+        const reconciledPayload = parsedPayload.invoiceTypeCode === env.AIGENTRIX_INVOICE_TYPE_CODE
+            ? reconcileSaleInvoicePayload(parsedPayload)
+            : parsedPayload;
         const existingSubmission = await InvoiceSubmissionModel.findOne({
-            organizationId: parsedPayload.organizationId,
-            documentId: parsedPayload.documentId,
+            companyId: reconciledPayload.companyId,
+            documentId: reconciledPayload.documentId,
         });
+
+        if (existingSubmission && existingSubmission.organizationId !== reconciledPayload.organizationId) {
+            return {
+                statusCode: 409,
+                body: {
+                    success: false,
+                    error: {
+                        code: "INVOICE_DOCUMENT_ID_ALREADY_USED",
+                        message: "This documentId has already been used for the configured E-Invoice company.",
+                    },
+                },
+            };
+        }
+
+        if (existingSubmission?.status === "SUBMITTED") {
+            await storeSubmissionXmlIfAvailable(existingSubmission);
+            return {
+                statusCode: 200,
+                body: {
+                    success: true,
+                    data: buildSubmissionResponseData(existingSubmission),
+                },
+            };
+        }
 
         if (existingSubmission && existingSubmission.status !== "FAILED") {
             return {
@@ -366,9 +426,9 @@ export const createInvoiceSubmission = async (
         }
 
         const providerDocumentId = existingSubmission?.providerDocumentId
-            ?? (await reserveProviderDocumentId(parsedPayload.documentId)).providerDocumentId;
+            ?? (await reserveProviderDocumentId(reconciledPayload.documentId)).providerDocumentId;
         const providerPayload: InvoiceSubmissionPayload = {
-            ...parsedPayload,
+            ...reconciledPayload,
             documentId: providerDocumentId,
         };
 
@@ -393,7 +453,7 @@ export const createInvoiceSubmission = async (
                 body: {
                     success: false,
                     data: {
-                        documentId: parsedPayload.documentId,
+                        documentId: reconciledPayload.documentId,
                         providerDocumentId,
                         status: "VALIDATION_FAILED",
                         provider: "aigentrix",
@@ -408,10 +468,10 @@ export const createInvoiceSubmission = async (
         }
 
         const submission = existingSubmission ?? await InvoiceSubmissionModel.create({
-            organizationId: parsedPayload.organizationId,
-            companyId: parsedPayload.companyId,
-            invoiceRef: parsedPayload.invoiceRef,
-            documentId: parsedPayload.documentId,
+            organizationId: reconciledPayload.organizationId,
+            companyId: reconciledPayload.companyId,
+            invoiceRef: reconciledPayload.invoiceRef,
+            documentId: reconciledPayload.documentId,
             providerDocumentId,
             payload: providerPayload,
             status: "PENDING",
@@ -420,8 +480,8 @@ export const createInvoiceSubmission = async (
         });
 
         if (existingSubmission) {
-            submission.companyId = parsedPayload.companyId;
-            submission.invoiceRef = parsedPayload.invoiceRef;
+            submission.companyId = reconciledPayload.companyId;
+            submission.invoiceRef = reconciledPayload.invoiceRef;
             submission.providerDocumentId = providerDocumentId;
             submission.payload = providerPayload;
             submission.status = "PENDING";
@@ -441,23 +501,13 @@ export const createInvoiceSubmission = async (
 
         await submission.save();
 
+        await storeSubmissionXmlIfAvailable(submission);
+
         return {
             statusCode: providerResult.success ? 200 : 422,
             body: {
                 success: providerResult.success,
-                data: {
-                    organizationId: submission.organizationId,
-                    companyId: submission.companyId,
-                    documentId: submission.documentId,
-                    providerDocumentId: submission.providerDocumentId,
-                    entryId: submission.entryId,
-                    invoiceRef: submission.invoiceRef,
-                    status: submission.status,
-                    provider: submission.provider,
-                    providerValidationResponse: submission.providerValidationResponse,
-                    providerResponse: submission.providerResponse,
-                    providerError: submission.providerError
-                },
+                data: buildSubmissionResponseData(submission),
             },
         };
     } catch (error) {
@@ -474,6 +524,11 @@ export const createInvoiceSubmission = async (
                 },
             };
         }
+
+        console.error("E-Invoice submission failed", {
+            name: error instanceof Error ? error.name : "UnknownError",
+            message: error instanceof Error ? error.message : "Unknown error",
+        });
 
         return {
             statusCode: 500,

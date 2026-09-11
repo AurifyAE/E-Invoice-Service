@@ -73,14 +73,13 @@ const hasProviderFailure = (data: unknown): boolean => {
     return (data as AigentrixProviderResponse).success === false;
 };
 
-const postToAigentrix = async (
-    url: string,
+/**
+ * Produces the exact invoice object sent to Aigentrix. Keeping this separate
+ * also lets the submission service retain the matching XML representation.
+ */
+export const buildAigentrixInvoiceRequestBody = (
     payload: InvoiceSubmissionPayload,
-    shouldCheckValidationResult = false,
-    shouldWrapPayloadInArray = false,
-    requestOptions: AigentrixRequestOptions = {},
-): Promise<AigentrixResult> => {
-    const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
+): Partial<InvoiceSubmissionPayload> => {
     const isCreditNote = payload.invoiceTypeCode === env.AIGENTRIX_INVOICE_CREDITNOTE_CODE;
     const requestBody: Partial<InvoiceSubmissionPayload> = { ...payload };
 
@@ -96,6 +95,19 @@ const postToAigentrix = async (
     } else {
         requestBody.payments = [{ paymentMeansCode: "30" }];
     }
+
+    return requestBody;
+};
+
+const postToAigentrix = async (
+    url: string,
+    payload: InvoiceSubmissionPayload,
+    shouldCheckValidationResult = false,
+    shouldWrapPayloadInArray = false,
+    requestOptions: AigentrixRequestOptions = {},
+): Promise<AigentrixResult> => {
+    const aigentrixOptions = resolveAigentrixRequestOptions(requestOptions);
+    const requestBody = buildAigentrixInvoiceRequestBody(payload);
 
     const requestPayload = shouldWrapPayloadInArray ? [requestBody] : requestBody;
 
@@ -150,12 +162,34 @@ export const getInboundInvoiceSummary = async (
         signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error(`Inbound invoice request failed (${response.status})`);
-    const data = await response.json() as { success?: boolean; meta?: { totalCount?: number; totalAmount?: number } };
+    const data = await response.json() as {
+        success?: boolean;
+        meta?: { totalCount?: number; totalAmount?: number };
+        einvoiceEntryResponseDTOS?: unknown;
+        data?: unknown;
+        error?: unknown;
+    };
     const count = data.meta?.totalCount;
     const amount = data.meta?.totalAmount;
-    if (data.success === false || typeof count !== "number" || typeof amount !== "number") {
+    const responseEntries = data.einvoiceEntryResponseDTOS ?? data.data;
+    const isEmptyEntries = Array.isArray(responseEntries) && responseEntries.length === 0;
+    const isEmptyNoDataResponse = (data.success === undefined || data.success === false)
+        && data.error === undefined
+        && data.meta === undefined
+        && (responseEntries === undefined || responseEntries === null || isEmptyEntries);
+    if ((isEmptyEntries || isEmptyNoDataResponse) && (count === undefined || amount === undefined)) {
+        return { count: 0, amount: 0 };
+    }
+
+    if (data.success === false) {
         throw new Error("Inbound invoice response is missing valid totalCount or totalAmount");
     }
+
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0
+        || typeof amount !== "number" || !Number.isFinite(amount)) {
+        throw new Error("Inbound invoice response is missing valid totalCount or totalAmount");
+    }
+
     return { count, amount };
 };
 
@@ -275,11 +309,26 @@ export const getInboundInvoiceEntries = async (
     const data = await response.json() as {
         success?: boolean;
         einvoiceEntryResponseDTOS?: AigentrixInboundInvoice[];
+        data?: unknown;
         meta?: { totalCount?: number; page?: number; perPage?: number };
+        error?: unknown;
     };
-    const entries = data.einvoiceEntryResponseDTOS;
+    const entries = data.einvoiceEntryResponseDTOS ?? (Array.isArray(data.data) ? data.data : undefined);
     const totalCount = data.meta?.totalCount;
-    if (data.success === false || !Array.isArray(entries) || !data.meta || typeof totalCount !== "number" || !Number.isSafeInteger(totalCount) || totalCount < 0) {
+    const isEmptyEntries = Array.isArray(entries) && entries.length === 0;
+    const isEmptyNoDataResponse = (data.success === undefined || data.success === false)
+        && data.error === undefined
+        && data.meta === undefined
+        && (entries === undefined || isEmptyEntries);
+    if ((isEmptyEntries || isEmptyNoDataResponse) && (totalCount === undefined || !data.meta)) {
+        return { entries: [], totalCount: 0, page, perPage };
+    }
+
+    if (data.success === false) {
+        throw new Error("Inbound invoice response is missing valid entries or meta.totalCount");
+    }
+
+    if (!Array.isArray(entries) || !data.meta || typeof totalCount !== "number" || !Number.isSafeInteger(totalCount) || totalCount < 0) {
         throw new Error("Inbound invoice response is missing valid entries or meta.totalCount");
     }
     const responsePage = data.meta.page;

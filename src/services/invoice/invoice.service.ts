@@ -384,22 +384,9 @@ export const createInvoiceSubmission = async (
             ? reconcileSaleInvoicePayload(parsedPayload)
             : parsedPayload;
         const existingSubmission = await InvoiceSubmissionModel.findOne({
-            companyId: reconciledPayload.companyId,
+            organizationId: reconciledPayload.organizationId,
             documentId: reconciledPayload.documentId,
         });
-
-        if (existingSubmission && existingSubmission.organizationId !== reconciledPayload.organizationId) {
-            return {
-                statusCode: 409,
-                body: {
-                    success: false,
-                    error: {
-                        code: "INVOICE_DOCUMENT_ID_ALREADY_USED",
-                        message: "This documentId has already been used for the configured E-Invoice company.",
-                    },
-                },
-            };
-        }
 
         if (existingSubmission?.status === "SUBMITTED") {
             await storeSubmissionXmlIfAvailable(existingSubmission);

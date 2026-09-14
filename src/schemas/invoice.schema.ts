@@ -6,6 +6,8 @@ export const invoiceLineSchema = z.object({
     quantity: z.coerce.number().positive(),
     quantityUom: z.string().min(1, "quantityUom is required"),
     unitPrice: z.coerce.number().nonnegative(),
+    priceBaseQty: z.coerce.number().positive().optional(),
+    priceBaseQtyUom: z.string().trim().min(1).optional(),
     lineNetAmount: z.coerce.number().nonnegative(),
     taxCategory: z.string().min(1, "taxCategory is required"),
     taxRatePercent: z.coerce.number().nonnegative(),

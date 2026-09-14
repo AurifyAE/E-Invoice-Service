@@ -600,7 +600,6 @@ export const getInvoiceDashboard = async (
             const documentId = submission.providerDocumentId ?? submission.payload?.documentId ?? "";
             return !successfulDocumentIds.has(documentId);
         });
-        const totalInvoices = entryDatas.length + submissionsWithoutEntryData.length;
         const failed = submissionsWithoutEntryData.filter((submission) => isFailedSubmissionStatus(submission.status)).length;
         const validationFailed = submissionsWithoutEntryData.filter((submission) => Boolean(submission.providerValidationResponse) && submission.status === "FAILED").length;
         const submittedAttempts = submissions.filter((submission) => submission.status === "SUBMITTED").length;
@@ -611,7 +610,8 @@ export const getInvoiceDashboard = async (
         const failedOutbound = outboundEntries.filter((entry) => isFailedSubmissionStatus(entry.entryData?.status)).length;
         const failedInbound = inboundEntries.filter((entry) => isFailedSubmissionStatus(entry.entryData?.status)).length;
         const totalOutbound = outboundEntries.length;
-        const totalInbound = inboundEntries.length;
+        const totalInbound = inboundSummary.count;
+        const totalInvoices = totalOutbound + totalInbound;
         const successRate = totalOutbound > 0 ? roundAmount((acknowledged / totalOutbound) * 100) : 0;
         const totalAmount = roundAmount(entryDatas.reduce((sum, entry) => sum + (Number(entry.entryData?.payableAmount) || 0), 0));
         const totalVat = roundAmount(entryDatas.reduce((sum, entry) => sum + (Number(entry.entryData?.taxAmount) || 0), 0));

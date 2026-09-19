@@ -872,19 +872,30 @@ export const getInvoiceEntry = async (
         }
 
         if (typeof result.data === "object" && result.data !== null) {
-            const entryData = result.data as Record<string, unknown>;
+            const providerEntryData = result.data as Record<string, unknown>;
+            const submission = await InvoiceSubmissionModel.findOne({
+                organizationId: parsedOrganizationId,
+                entryId: parsedEntryId,
+            }).select("invoiceRef").lean<LeanInvoiceSubmission | null>();
+            const savedInvoiceRef = submission?.invoiceRef?.trim();
+            const entryData = savedInvoiceRef
+                ? { ...providerEntryData, invoiceRef: savedInvoiceRef }
+                : providerEntryData;
             const providerEntryId = getEntryIdFromProviderResponse(entryData);
 
             if (providerEntryId) {
                 await upsertEntryData(providerEntryId, parsedVatTrn, parsedOrganizationId, entryData);
             }
+
+            return {
+                statusCode: 200,
+                body: entryData,
+            };
         }
 
         return {
             statusCode: 200,
-            body: typeof result.data === "object" && result.data !== null
-                ? result.data as Record<string, unknown>
-                : { data: result.data },
+            body: { data: result.data },
         };
     } catch (error) {
         return {

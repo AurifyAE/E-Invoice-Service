@@ -26,6 +26,8 @@ export const invoiceLineSchema = z.object({
 
 export const paymentSchema = z.object({
     paymentMeansCode: z.string().min(1, "paymentMeansCode is required"),
+    creditAccountIban: z.string().trim().min(1).optional(),
+    creditAccountScheme: z.string().trim().min(1).optional(),
 });
 
 const getNestedRecord = (record: Record<string, unknown>, key: string): Record<string, unknown> | undefined => {
@@ -156,6 +158,9 @@ const invoiceSubmissionPayloadSchema = z.object({
     sellerCity: z.string().min(1, "sellerCity is required"),
     sellerCountrySubdivision: z.string().optional(),
     sellerCountryCode: z.string().min(1, "sellerCountryCode is required"),
+    sellerLegalRegistrationId: z.string().trim().min(1).optional(),
+    sellerLegalRegistrationType: z.string().trim().min(1).optional(),
+    sellerLegalRegistrationAuthority: z.string().trim().min(1).optional(),
     buyerName: z.string().trim().optional(),
     buyerVatTrn: z.string().trim().optional(),
     buyerRegisteredName: z.string().optional(),

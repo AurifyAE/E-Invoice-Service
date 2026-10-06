@@ -38,6 +38,8 @@ const invoiceLineSchema = new Schema(
 const paymentSchema = new Schema(
     {
         paymentMeansCode: { type: String, required: true },
+        creditAccountIban: { type: String },
+        creditAccountScheme: { type: String },
     },
     { _id: false }
 );
@@ -63,6 +65,9 @@ const invoicePayloadSchema = new Schema(
         sellerCity: { type: String, required: true },
         sellerCountrySubdivision: { type: String },
         sellerCountryCode: { type: String, required: true },
+        sellerLegalRegistrationId: { type: String },
+        sellerLegalRegistrationType: { type: String },
+        sellerLegalRegistrationAuthority: { type: String },
         buyerName: { type: String },
         buyerVatTrn: { type: String },
         buyerRegisteredName: { type: String },

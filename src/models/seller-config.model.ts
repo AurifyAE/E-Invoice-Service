@@ -6,6 +6,11 @@ export interface SellerConfigDocument extends mongoose.Document {
     apiKey: string;
     companyId: number;
     participantId: string;
+    sellerLegalRegistrationId: string;
+    sellerLegalRegistrationType: string;
+    sellerLegalRegistrationAuthority: string;
+    creditAccountScheme: string;
+    creditAccountIban: string;
 }
 
 const sellerConfigSchema = new Schema<SellerConfigDocument>(
@@ -35,6 +40,34 @@ const sellerConfigSchema = new Schema<SellerConfigDocument>(
             type: String,
             required: true,
             index: true,
+        },
+        sellerLegalRegistrationId: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        sellerLegalRegistrationType: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: "",
+        },
+        sellerLegalRegistrationAuthority: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        creditAccountScheme: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: "IBAN",
+        },
+        creditAccountIban: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: "",
         },
     },
     { timestamps: true }

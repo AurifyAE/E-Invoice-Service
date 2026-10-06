@@ -134,10 +134,23 @@ const extractEntryId = (providerResponse: unknown): number | undefined => {
 
 const buildInvoicePayload = (
     payload: unknown,
-    sellerConfig: { companyId: number; participantId: string },
+    sellerConfig: {
+        companyId: number;
+        participantId: string;
+        sellerLegalRegistrationId?: string;
+        sellerLegalRegistrationType?: string;
+        sellerLegalRegistrationAuthority?: string;
+        creditAccountScheme?: string;
+        creditAccountIban?: string;
+    },
 ) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
     const isCreditNote = rawPayload.invoiceTransactionType === "creditNote";
+    const sellerLegalRegistrationId = String(sellerConfig.sellerLegalRegistrationId ?? "").trim();
+    const sellerLegalRegistrationType = String(sellerConfig.sellerLegalRegistrationType ?? "").trim();
+    const sellerLegalRegistrationAuthority = String(sellerConfig.sellerLegalRegistrationAuthority ?? "").trim();
+    const creditAccountIban = String(sellerConfig.creditAccountIban ?? "").trim();
+    const creditAccountScheme = String(sellerConfig.creditAccountScheme ?? "").trim() || "IBAN";
     const invoicePayload = { ...rawPayload };
 
     delete invoicePayload.creditNoteReasonCode;
@@ -149,6 +162,10 @@ const buildInvoicePayload = (
         ...invoicePayload,
         companyId: String(sellerConfig.companyId),
         supplierParticipantId: sellerConfig.participantId,
+        // ibr-150-ae needs the identifier, ibr-181-ae its type, ibr-172-ae the authority.
+        ...(sellerLegalRegistrationId ? { sellerLegalRegistrationId } : {}),
+        ...(sellerLegalRegistrationType ? { sellerLegalRegistrationType } : {}),
+        ...(sellerLegalRegistrationAuthority ? { sellerLegalRegistrationAuthority } : {}),
         invoiceTypeCode: String(
             isCreditNote ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE : env.AIGENTRIX_INVOICE_TYPE_CODE,
         ),
@@ -156,7 +173,15 @@ const buildInvoicePayload = (
         invoiceTransactionType: 0,
         ...(isCreditNote
             ? { creditNoteReasonCode: "VD" }
-            : { payments: [{ paymentMeansCode: "30" }] }),
+            : {
+                payments: [{
+                    paymentMeansCode: "30",
+                    // ibr-192-ae: payment means 30 needs the payee account identifier (ibt-084).
+                    ...(creditAccountIban
+                        ? { creditAccountIban, creditAccountScheme }
+                        : {}),
+                }],
+            }),
     };
 };
 

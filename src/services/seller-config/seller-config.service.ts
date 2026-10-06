@@ -17,12 +17,22 @@ const toSellerConfigResponse = (sellerConfig: {
     sellerVatTrn: number;
     companyId: number;
     participantId: string;
+    sellerLegalRegistrationId?: string;
+    sellerLegalRegistrationType?: string;
+    sellerLegalRegistrationAuthority?: string;
+    creditAccountScheme?: string;
+    creditAccountIban?: string;
     apiKey?: string;
 }) => ({
     organizationId: sellerConfig.organizationId,
     sellerVatTrn: sellerConfig.sellerVatTrn,
     companyId: sellerConfig.companyId,
     participantId: sellerConfig.participantId,
+    sellerLegalRegistrationId: sellerConfig.sellerLegalRegistrationId ?? "",
+    sellerLegalRegistrationType: sellerConfig.sellerLegalRegistrationType ?? "",
+    sellerLegalRegistrationAuthority: sellerConfig.sellerLegalRegistrationAuthority ?? "",
+    creditAccountScheme: sellerConfig.creditAccountScheme ?? "",
+    creditAccountIban: sellerConfig.creditAccountIban ?? "",
     apiKey: sellerConfig.apiKey ?? "",
     hasApiKey: Boolean(sellerConfig.apiKey),
 });
@@ -178,6 +188,26 @@ export const updateSellerConfig = async (
 
         if (parsedPayload.participantId !== undefined) {
             sellerConfig.participantId = parsedPayload.participantId;
+        }
+
+        if (parsedPayload.sellerLegalRegistrationId !== undefined) {
+            sellerConfig.sellerLegalRegistrationId = parsedPayload.sellerLegalRegistrationId;
+        }
+
+        if (parsedPayload.sellerLegalRegistrationType !== undefined) {
+            sellerConfig.sellerLegalRegistrationType = parsedPayload.sellerLegalRegistrationType;
+        }
+
+        if (parsedPayload.sellerLegalRegistrationAuthority !== undefined) {
+            sellerConfig.sellerLegalRegistrationAuthority = parsedPayload.sellerLegalRegistrationAuthority;
+        }
+
+        if (parsedPayload.creditAccountScheme !== undefined) {
+            sellerConfig.creditAccountScheme = parsedPayload.creditAccountScheme;
+        }
+
+        if (parsedPayload.creditAccountIban !== undefined) {
+            sellerConfig.creditAccountIban = parsedPayload.creditAccountIban;
         }
 
         await sellerConfig.save();

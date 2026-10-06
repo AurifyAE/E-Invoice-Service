@@ -85,15 +85,13 @@ export const buildAigentrixInvoiceRequestBody = (
 
     delete requestBody.organizationId;
     delete requestBody.creditNoteReasonCode;
-    delete requestBody.payments;
     requestBody.invoiceTypeCode = payload.invoiceTypeCode;
     requestBody.status = env.AIGENTRIX_INVOICE_STATUS;
     requestBody.invoiceTransactionType = 0;
 
     if (isCreditNote) {
+        delete requestBody.payments;
         requestBody.creditNoteReasonCode = "VD";
-    } else {
-        requestBody.payments = [{ paymentMeansCode: "30" }];
     }
 
     return requestBody;

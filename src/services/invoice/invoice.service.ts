@@ -146,6 +146,7 @@ const buildInvoicePayload = (
 ) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
     const isCreditNote = rawPayload.invoiceTransactionType === "creditNote";
+    const isDebitNote = rawPayload.invoiceTransactionType === "debitNote";
     const sellerLegalRegistrationId = String(sellerConfig.sellerLegalRegistrationId ?? "").trim();
     const sellerLegalRegistrationType = String(sellerConfig.sellerLegalRegistrationType ?? "").trim();
     const sellerLegalRegistrationAuthority = String(sellerConfig.sellerLegalRegistrationAuthority ?? "").trim();
@@ -167,7 +168,11 @@ const buildInvoicePayload = (
         ...(sellerLegalRegistrationType ? { sellerLegalRegistrationType } : {}),
         ...(sellerLegalRegistrationAuthority ? { sellerLegalRegistrationAuthority } : {}),
         invoiceTypeCode: String(
-            isCreditNote ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE : env.AIGENTRIX_INVOICE_TYPE_CODE,
+            isCreditNote
+                ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE
+                : isDebitNote
+                    ? env.AIGENTRIX_INVOICE_DEBITNOTE_CODE
+                    : env.AIGENTRIX_INVOICE_TYPE_CODE,
         ),
         status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
@@ -361,6 +366,9 @@ const getInvoiceDisplayType = (invoiceTypeCode?: string): string => {
     if (invoiceTypeCode === "381") {
         return "Credit Note";
     }
+    if (invoiceTypeCode === env.AIGENTRIX_INVOICE_DEBITNOTE_CODE) {
+        return "Debit Note";
+    }
 
     return "Sale";
 };
@@ -405,7 +413,11 @@ export const createInvoiceSubmission = async (
 
         const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
-        const reconciledPayload = parsedPayload.invoiceTypeCode === env.AIGENTRIX_INVOICE_TYPE_CODE
+        // Debit notes carry the same line/total rounding as the sale invoice.
+        const reconciledPayload = [
+            env.AIGENTRIX_INVOICE_TYPE_CODE,
+            env.AIGENTRIX_INVOICE_DEBITNOTE_CODE,
+        ].includes(parsedPayload.invoiceTypeCode)
             ? reconcileSaleInvoicePayload(parsedPayload)
             : parsedPayload;
         const existingSubmission = await InvoiceSubmissionModel.findOne({

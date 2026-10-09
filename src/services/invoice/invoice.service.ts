@@ -3,7 +3,10 @@ import { env } from "../../config/env.js";
 import { EntryDataModel } from "../../models/entry-data.model.js";
 import { EntryStatusTimelineModel } from "../../models/entry-status-timeline.model.js";
 import { InvoiceSubmissionModel } from "../../models/invoice-submission.model.js";
-import type { InvoiceSubmissionDocument } from "../../models/invoice-submission.model.js";
+import type {
+    InvoiceSubmissionDocument,
+    InvoiceSubmissionTransactionType,
+} from "../../models/invoice-submission.model.js";
 import { SellerConfigModel } from "../../models/seller-config.model.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
 import { invoiceSubmissionSchema } from "../../schemas/invoice.schema.js";
@@ -31,6 +34,7 @@ type LeanInvoiceSubmission = {
     documentId?: string;
     providerDocumentId?: string;
     invoiceRef?: string;
+    transactionType?: InvoiceSubmissionTransactionType;
     entryId?: number;
     status?: string;
     payload?: {
@@ -146,7 +150,6 @@ const buildInvoicePayload = (
 ) => {
     const rawPayload = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
     const isCreditNote = rawPayload.invoiceTransactionType === "creditNote";
-    const isDebitNote = rawPayload.invoiceTransactionType === "debitNote";
     const sellerLegalRegistrationId = String(sellerConfig.sellerLegalRegistrationId ?? "").trim();
     const sellerLegalRegistrationType = String(sellerConfig.sellerLegalRegistrationType ?? "").trim();
     const sellerLegalRegistrationAuthority = String(sellerConfig.sellerLegalRegistrationAuthority ?? "").trim();
@@ -167,12 +170,12 @@ const buildInvoicePayload = (
         ...(sellerLegalRegistrationId ? { sellerLegalRegistrationId } : {}),
         ...(sellerLegalRegistrationType ? { sellerLegalRegistrationType } : {}),
         ...(sellerLegalRegistrationAuthority ? { sellerLegalRegistrationAuthority } : {}),
+        // PINT AE has no debit-note type (ibr-cl-01 allows only 380/480 for an
+        // Invoice), so a debit note is a Tax Invoice for the additional amount.
         invoiceTypeCode: String(
             isCreditNote
                 ? env.AIGENTRIX_INVOICE_CREDITNOTE_CODE
-                : isDebitNote
-                    ? env.AIGENTRIX_INVOICE_DEBITNOTE_CODE
-                    : env.AIGENTRIX_INVOICE_TYPE_CODE,
+                : env.AIGENTRIX_INVOICE_TYPE_CODE,
         ),
         status: String(env.AIGENTRIX_INVOICE_STATUS),
         invoiceTransactionType: 0,
@@ -362,11 +365,21 @@ const isAcknowledgedEntryStatus = (status?: string): boolean => {
     return status === "ACKNOWLEDGED";
 };
 
-const getInvoiceDisplayType = (invoiceTypeCode?: string): string => {
+const getSubmissionTransactionType = (payload: unknown): InvoiceSubmissionTransactionType => {
+    const transactionType = typeof payload === "object" && payload !== null
+        ? (payload as Record<string, unknown>).invoiceTransactionType
+        : undefined;
+
+    return transactionType === "creditNote" || transactionType === "debitNote" ? transactionType : "sale";
+};
+
+// A debit note shares type code 380 with a sale, so only the stored ERP
+// transaction type tells them apart. "383" covers submissions made before that.
+const getInvoiceDisplayType = (invoiceTypeCode?: string, transactionType?: string): string => {
     if (invoiceTypeCode === "381") {
         return "Credit Note";
     }
-    if (invoiceTypeCode === env.AIGENTRIX_INVOICE_DEBITNOTE_CODE) {
+    if (transactionType === "debitNote" || invoiceTypeCode === "383") {
         return "Debit Note";
     }
 
@@ -413,11 +426,9 @@ export const createInvoiceSubmission = async (
 
         const aigentrixOptions = { apiKey };
         const parsedPayload = invoiceSubmissionSchema.parse(buildInvoicePayload(payload, sellerConfig));
-        // Debit notes carry the same line/total rounding as the sale invoice.
-        const reconciledPayload = [
-            env.AIGENTRIX_INVOICE_TYPE_CODE,
-            env.AIGENTRIX_INVOICE_DEBITNOTE_CODE,
-        ].includes(parsedPayload.invoiceTypeCode)
+        const transactionType = getSubmissionTransactionType(payload);
+        // Debit notes are tax invoices, so they carry the sale line/total rounding.
+        const reconciledPayload = parsedPayload.invoiceTypeCode === env.AIGENTRIX_INVOICE_TYPE_CODE
             ? reconcileSaleInvoicePayload(parsedPayload)
             : parsedPayload;
         const existingSubmission = await InvoiceSubmissionModel.findOne({
@@ -461,6 +472,7 @@ export const createInvoiceSubmission = async (
         if (!validationResult.success) {
             if (existingSubmission) {
                 existingSubmission.payload = providerPayload;
+                existingSubmission.transactionType = transactionType;
                 existingSubmission.status = "FAILED";
                 existingSubmission.providerValidationResponse = validationResult.error;
                 existingSubmission.providerResponse = undefined;
@@ -495,6 +507,7 @@ export const createInvoiceSubmission = async (
             organizationId: reconciledPayload.organizationId,
             companyId: reconciledPayload.companyId,
             invoiceRef: reconciledPayload.invoiceRef,
+            transactionType,
             documentId: reconciledPayload.documentId,
             providerDocumentId,
             payload: providerPayload,
@@ -506,6 +519,7 @@ export const createInvoiceSubmission = async (
         if (existingSubmission) {
             submission.companyId = reconciledPayload.companyId;
             submission.invoiceRef = reconciledPayload.invoiceRef;
+            submission.transactionType = transactionType;
             submission.providerDocumentId = providerDocumentId;
             submission.payload = providerPayload;
             submission.status = "PENDING";
@@ -683,10 +697,16 @@ export const getInvoiceDashboard = async (
         const topCustomer = Array.from(customerMap.values()).sort((first, second) => second.amount - first.amount)[0] ?? null;
         const topCurrency = Array.from(currencyMap.values()).sort((first, second) => second.amount - first.amount)[0] ?? null;
 
+        const transactionTypeByProviderDocumentId = new Map(
+            submissions.map((submission) => [submission.providerDocumentId ?? "", submission.transactionType]),
+        );
         const recentEntryActivity = entryDatas.map((entry) => ({
             entryId: entry.entryId,
             voucher: entry.entryData?.documentId ?? entry.entryData?.invoiceRef ?? null,
-            type: getInvoiceDisplayType(entry.entryData?.invoiceTypeCode),
+            type: getInvoiceDisplayType(
+                entry.entryData?.invoiceTypeCode,
+                transactionTypeByProviderDocumentId.get(entry.entryData?.documentId ?? ""),
+            ),
             party: entry.entryData?.buyerName ?? null,
             eInvoiceStatus: entry.entryData?.status ?? null,
             taxStatus: entry.entryData?.taxStatus ?? null,
@@ -701,7 +721,7 @@ export const getInvoiceDashboard = async (
             .map((submission) => ({
                 entryId: submission.entryId ?? null,
                 voucher: submission.documentId ?? submission.payload?.documentId ?? submission.invoiceRef ?? null,
-                type: getInvoiceDisplayType(submission.payload?.invoiceTypeCode),
+                type: getInvoiceDisplayType(submission.payload?.invoiceTypeCode, submission.transactionType),
                 party: submission.payload?.buyerName ?? null,
                 eInvoiceStatus: submission.status ?? null,
                 taxStatus: null,

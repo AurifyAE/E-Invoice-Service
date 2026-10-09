@@ -2,11 +2,13 @@ import mongoose, { Schema } from "mongoose";
 import type { InvoiceSubmissionPayload } from "../schemas/invoice.schema.js";
 
 export type InvoiceSubmissionStatus = "PENDING" | "SUBMITTED" | "FAILED";
+export type InvoiceSubmissionTransactionType = "sale" | "creditNote" | "debitNote";
 
 export interface InvoiceSubmissionDocument extends mongoose.Document {
     organizationId: string;
     companyId: string;
     invoiceRef?: string;
+    transactionType?: InvoiceSubmissionTransactionType;
     documentId: string;
     providerDocumentId: string;
     entryId?: number;
@@ -90,6 +92,8 @@ const invoiceSubmissionSchema = new Schema<InvoiceSubmissionDocument>(
         organizationId: { type: String, required: true, index: true },
         companyId: { type: String, required: true, index: true },
         invoiceRef: { type: String },
+        // ERP document kind; a debit note is submitted as type 380 like a sale.
+        transactionType: { type: String, enum: ["sale", "creditNote", "debitNote"] },
         documentId: { type: String, required: true, index: true },
         providerDocumentId: { type: String, required: true, index: true },
         entryId: { type: Number, index: true },

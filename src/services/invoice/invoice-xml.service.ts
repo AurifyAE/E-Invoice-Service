@@ -36,6 +36,11 @@ export const buildAigentrixSubmissionXml = (requestBody: InvoiceRequestBody): st
         .filter((line): line is InvoiceRequestBody => typeof line === "object" && line !== null && !Array.isArray(line))
         .map((line) => `    <Line>\n${buildScalarFields(line, "      ")}\n    </Line>`)
         .join("\n");
+    const taxSubtotals = Array.isArray(requestBody.taxSubtotals) ? requestBody.taxSubtotals : [];
+    const taxSubtotalsXml = taxSubtotals
+        .filter((subtotal): subtotal is InvoiceRequestBody => typeof subtotal === "object" && subtotal !== null && !Array.isArray(subtotal))
+        .map((subtotal) => `    <TaxSubtotal>\n${buildScalarFields(subtotal, "      ")}\n    </TaxSubtotal>`)
+        .join("\n");
     const paymentsXml = payments
         .filter((payment): payment is InvoiceRequestBody => typeof payment === "object" && payment !== null && !Array.isArray(payment))
         .map((payment) => `    <Payment>\n${buildScalarFields(payment, "      ")}\n    </Payment>`)
@@ -48,6 +53,7 @@ export const buildAigentrixSubmissionXml = (requestBody: InvoiceRequestBody): st
         "  <Payments>",
         paymentsXml,
         "  </Payments>",
+        ...(taxSubtotalsXml ? ["  <TaxSubtotals>", taxSubtotalsXml, "  </TaxSubtotals>"] : []),
         "  <Lines>",
         linesXml,
         "  </Lines>",

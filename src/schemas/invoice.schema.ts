@@ -14,6 +14,15 @@ export const invoiceLineSchema = z.object({
     lineTaxAmount: z.coerce.number().nonnegative(),
     inclVatamount: z.coerce.number().nonnegative(),
     vatExemptReasonCode: z.string().optional(),
+    // Extended PINT AE line fields (sent only with AIGENTRIX_SEND_EXTENDED_FIELDS).
+    itemDescription: z.string().trim().min(1).optional(),
+    sellerItemId: z.string().trim().min(1).optional(),
+    itemTypeGoodsServices: z.enum(["G", "S", "B"]).optional(),
+    batchNumber: z.string().trim().min(1).optional(),
+    vatExemptReason: z.string().trim().min(1).optional(),
+    rcmGoodsTypeCode: z.string().trim().min(1).optional(),
+    // GS1 GTIN — item standard identifier (IBT-157, scheme 0160), required on AE lines.
+    itemStandardId: z.string().trim().regex(/^(\d{8}|\d{12}|\d{13}|\d{14})$/, "itemStandardId must be a GTIN").optional(),
 }).superRefine((line, context) => {
     if (line.taxCategory === "E" && !line.vatExemptReasonCode) {
         context.addIssue({
@@ -24,10 +33,63 @@ export const invoiceLineSchema = z.object({
     }
 });
 
+/** VAT breakdown (BG-23), one per category and rate. Computed by this service on submit. */
+export const taxSubtotalSchema = z.object({
+    taxCategory: z.string().min(1),
+    taxRatePercent: z.coerce.number().nonnegative(),
+    taxableAmount: z.coerce.number(),
+    taxAmount: z.coerce.number(),
+});
+
 export const paymentSchema = z.object({
     paymentMeansCode: z.string().min(1, "paymentMeansCode is required"),
     creditAccountIban: z.string().trim().min(1).optional(),
     creditAccountScheme: z.string().trim().min(1).optional(),
+});
+
+/**
+ * BTAE-02 transaction type: eight 0/1 positions, in this order (Implementation Guide §6.2).
+ */
+export const TRANSACTION_TYPE_FLAG_ORDER = [
+    "freeZone",
+    "deemedSupply",
+    "marginScheme",
+    "summaryInvoice",
+    "continuousSupply",
+    "disclosedAgent",
+    "eCommerce",
+    "export",
+] as const;
+
+const transactionTypeFlagsSchema = z.object(
+    Object.fromEntries(TRANSACTION_TYPE_FLAG_ORDER.map((flag) => [flag, z.boolean().optional()])) as
+        Record<(typeof TRANSACTION_TYPE_FLAG_ORDER)[number], z.ZodOptional<z.ZodBoolean>>,
+);
+
+export const buildTransactionTypeCode = (
+    flags: Partial<Record<(typeof TRANSACTION_TYPE_FLAG_ORDER)[number], boolean | undefined>> = {},
+): string => TRANSACTION_TYPE_FLAG_ORDER.map((flag) => (flags[flag] ? "1" : "0")).join("");
+
+/** ERP credit note reasons → PINT AE BTAE-03 codes (Decree-Law Art. 61(1) a–e, VD). */
+export const CREDIT_NOTE_REASON_CODES = {
+    SUPPLY_CANCELLED: "DL8.61.1.A",
+    TAX_TREATMENT_CHANGED: "DL8.61.1.B",
+    PRICE_FIXING_DOWN: "DL8.61.1.C",
+    WEIGHT_ASSAY_ADJUSTMENT: "DL8.61.1.C",
+    GOODS_RETURN: "DL8.61.1.D",
+    TAX_ERROR: "DL8.61.1.E",
+    VOLUME_DISCOUNT: "VD",
+} as const;
+
+export type CreditNoteReason = keyof typeof CREDIT_NOTE_REASON_CODES;
+
+const creditNoteReasonSchema = z.enum(
+    Object.keys(CREDIT_NOTE_REASON_CODES) as [CreditNoteReason, ...CreditNoteReason[]],
+);
+
+export const precedingInvoiceSchema = z.object({
+    invoiceNumber: z.string().trim().min(1, "invoiceNumber is required"),
+    issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "issueDate must be YYYY-MM-DD").optional(),
 });
 
 const getNestedRecord = (record: Record<string, unknown>, key: string): Record<string, unknown> | undefined => {
@@ -173,6 +235,12 @@ const invoiceSubmissionPayloadSchema = z.object({
     totalIncludingTax: z.coerce.number().nonnegative(),
     payableAmount: z.coerce.number().nonnegative(),
     payments: z.array(paymentSchema).optional(),
+    // Extended PINT AE header fields (sent only with AIGENTRIX_SEND_EXTENDED_FIELDS).
+    transactionTypeFlags: transactionTypeFlagsSchema.optional(),
+    creditNoteReason: creditNoteReasonSchema.optional(),
+    precedingInvoices: z.array(precedingInvoiceSchema).optional(),
+    taxPointDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "taxPointDate must be YYYY-MM-DD").optional(),
+    taxSubtotals: z.array(taxSubtotalSchema).optional(),
     lines: z.array(invoiceLineSchema).min(1, "At least one invoice line is required"),
 }).superRefine((invoice, context) => {
     if (invoice.buyerVatRegistered !== true) {
@@ -190,6 +258,7 @@ const invoiceSubmissionPayloadSchema = z.object({
     });
 }).transform(({ buyerVatRegistered: _buyerVatRegistered, ...invoice }) => ({
     ...invoice,
+    transactionTypeCode: buildTransactionTypeCode(invoice.transactionTypeFlags),
     ...(invoice.creditNoteReasonCode ? {} : { payments: invoice.payments ?? [{ paymentMeansCode: "30" }] }),
     buyerRegisteredName: invoice.buyerRegisteredName?.trim() || invoice.buyerName,
     sellerCountrySubdivision: invoice.sellerCountrySubdivision ?? getEmirateSubdivision(invoice.sellerCity),

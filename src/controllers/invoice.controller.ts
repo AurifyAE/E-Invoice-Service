@@ -7,7 +7,9 @@ import {
     getInvoiceStatusTimeline,
 } from "../services/invoice/invoice.service.js";
 
+// The token's organization when the request carried one; the query otherwise (rollout mode).
 const getOrganizationId = (req: Request): string => {
+    if (req.principal) return req.principal.organizationId;
     const organizationId = req.query.organizationId ?? req.query.OrganizationId;
     return typeof organizationId === "string" ? organizationId : "";
 };

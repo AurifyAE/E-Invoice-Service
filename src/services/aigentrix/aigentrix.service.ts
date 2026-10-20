@@ -1,5 +1,6 @@
 import { env } from "../../config/env.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
+import { CREDIT_NOTE_REASON_CODES } from "../../schemas/invoice.schema.js";
 
 export interface AigentrixResult {
     success: boolean;
@@ -73,25 +74,99 @@ const hasProviderFailure = (data: unknown): boolean => {
     return (data as AigentrixProviderResponse).success === false;
 };
 
+// Predefined PINT AE buyer endpoints (Implementation Guide §6.3).
+const BUYER_NOT_ONBOARDED_ENDPOINT = "9900000098";
+const EXPORT_BUYER_WITHOUT_PEPPOL_ID_ENDPOINT = "9900000099";
+
+const EXTENDED_HEADER_FIELDS = [
+    "transactionTypeFlags",
+    "transactionTypeCode",
+    "creditNoteReason",
+    "precedingInvoices",
+    "taxPointDate",
+    "taxSubtotals",
+] as const;
+
+const EXTENDED_LINE_FIELDS = [
+    "itemDescription",
+    "sellerItemId",
+    "itemTypeGoodsServices",
+    "batchNumber",
+    "vatExemptReason",
+] as const;
+
+type AigentrixRequestBody = Omit<Partial<InvoiceSubmissionPayload>, "invoiceTransactionType" | "lines"> & {
+    invoiceTransactionType?: number | string;
+    lines?: Array<Record<string, unknown>>;
+};
+
+/**
+ * Aigentrix line shape. A reverse-charge line cannot pass without its AE-GoodsType code
+ * (BTAE-09, ibr-166-ae → Aigentrix `rcmCode`) and its GTIN (IBT-157, ibr-174-ae →
+ * Aigentrix `itemStandardId`; Aigentrix sets scheme 0160 itself). Both field names were
+ * confirmed against Aigentrix validation, so AE lines carry them whatever
+ * AIGENTRIX_SEND_EXTENDED_FIELDS says.
+ */
+const toAigentrixLine = (
+    line: InvoiceSubmissionPayload["lines"][number],
+    sendExtendedFields: boolean,
+): Record<string, unknown> => {
+    const { rcmGoodsTypeCode, itemStandardId, ...providerLine } = line;
+    if (!sendExtendedFields) {
+        EXTENDED_LINE_FIELDS.forEach((field) => delete providerLine[field]);
+    }
+    const sendStandardId = Boolean(itemStandardId) && (sendExtendedFields || line.taxCategory === "AE");
+    return {
+        ...providerLine,
+        ...(rcmGoodsTypeCode ? { rcmCode: rcmGoodsTypeCode } : {}),
+        ...(sendStandardId ? { itemStandardId } : {}),
+    };
+};
+
 /**
  * Produces the exact invoice object sent to Aigentrix. Keeping this separate
  * also lets the submission service retain the matching XML representation.
+ *
+ * Extended PINT AE fields are stored on every submission but stripped here unless
+ * AIGENTRIX_SEND_EXTENDED_FIELDS is on, so the default request is unchanged.
  */
 export const buildAigentrixInvoiceRequestBody = (
     payload: InvoiceSubmissionPayload,
-): Partial<InvoiceSubmissionPayload> => {
+    sendExtendedFields: boolean = env.AIGENTRIX_SEND_EXTENDED_FIELDS,
+): AigentrixRequestBody => {
     const isCreditNote = payload.invoiceTypeCode === env.AIGENTRIX_INVOICE_CREDITNOTE_CODE;
-    const requestBody: Partial<InvoiceSubmissionPayload> = { ...payload };
+    const requestBody: AigentrixRequestBody = { ...payload };
 
     delete requestBody.organizationId;
     delete requestBody.creditNoteReasonCode;
     requestBody.invoiceTypeCode = payload.invoiceTypeCode;
     requestBody.status = env.AIGENTRIX_INVOICE_STATUS;
-    requestBody.invoiceTransactionType = 0;
+    requestBody.invoiceTransactionType = sendExtendedFields ? payload.transactionTypeCode : 0;
 
     if (isCreditNote) {
         delete requestBody.payments;
-        requestBody.creditNoteReasonCode = "VD";
+        requestBody.creditNoteReasonCode = sendExtendedFields && payload.creditNoteReason
+            ? CREDIT_NOTE_REASON_CODES[payload.creditNoteReason]
+            : "VD";
+    }
+
+    // Business-level inputs: the code fields above carry them to Aigentrix.
+    delete requestBody.transactionTypeFlags;
+    delete requestBody.transactionTypeCode;
+    delete requestBody.creditNoteReason;
+
+    requestBody.lines = payload.lines.map((line) => toAigentrixLine(line, sendExtendedFields));
+
+    if (!sendExtendedFields) {
+        EXTENDED_HEADER_FIELDS.forEach((field) => delete requestBody[field]);
+        return requestBody;
+    }
+
+    // The buyer endpoint is never omitted: fall back to the predefined endpoint.
+    if (!payload.customerParticipantId?.trim()) {
+        requestBody.customerParticipantId = payload.transactionTypeFlags?.export
+            ? EXPORT_BUYER_WITHOUT_PEPPOL_ID_ENDPOINT
+            : BUYER_NOT_ONBOARDED_ENDPOINT;
     }
 
     return requestBody;

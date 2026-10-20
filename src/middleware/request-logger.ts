@@ -9,7 +9,9 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
             method: req.method,
             path: req.originalUrl,
             statusCode: res.statusCode,
-            durationMs
+            durationMs,
+            organizationId: req.principal?.organizationId,
+            userId: req.principal?.userId,
         };
 
         console.log(JSON.stringify(logPayload));

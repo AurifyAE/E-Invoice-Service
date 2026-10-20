@@ -19,6 +19,16 @@ const envSchema = z.object({
     // fallback buyer endpoint). They are validated and stored either way; they reach
     // Aigentrix only when this is "true".
     AIGENTRIX_SEND_EXTENDED_FIELDS: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
-});
+    // ERP_Backend signs a short-lived ES256 token for each signed-in ERP user; this is its
+    // public key (PEM, "\n" escapes allowed). Without it, tokens are not checked at all.
+    ERP_TOKEN_PUBLIC_KEY: z.string().trim().default('').transform((value) => value.replace(/\\n/g, '\n')),
+    // Rollout switch. While "false", a request with no token still goes through on the
+    // ids it carries (and is logged), and a seller TRN outside the token is only logged.
+    // A token that is present but invalid or expired is refused either way.
+    EINVOICE_AUTH_REQUIRED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+}).refine(
+    (config) => !config.EINVOICE_AUTH_REQUIRED || config.ERP_TOKEN_PUBLIC_KEY.length > 0,
+    { message: 'ERP_TOKEN_PUBLIC_KEY is required when EINVOICE_AUTH_REQUIRED is "true"', path: ['ERP_TOKEN_PUBLIC_KEY'] },
+);
 
 export const env = envSchema.parse(process.env);

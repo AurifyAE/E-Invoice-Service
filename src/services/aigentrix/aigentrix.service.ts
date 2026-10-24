@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
 import type { InvoiceSubmissionPayload } from "../../schemas/invoice.schema.js";
-import { CREDIT_NOTE_REASON_CODES } from "../../schemas/invoice.schema.js";
+import { buildTransactionTypeCode, CREDIT_NOTE_REASON_CODES } from "../../schemas/invoice.schema.js";
 
 export interface AigentrixResult {
     success: boolean;
@@ -141,7 +141,10 @@ export const buildAigentrixInvoiceRequestBody = (
     delete requestBody.creditNoteReasonCode;
     requestBody.invoiceTypeCode = payload.invoiceTypeCode;
     requestBody.status = env.AIGENTRIX_INVOICE_STATUS;
-    requestBody.invoiceTransactionType = sendExtendedFields ? payload.transactionTypeCode : 0;
+    // ibr-154-ae: BTAE-02 is always the eight-position code; a bare 0 no longer passes.
+    requestBody.invoiceTransactionType = sendExtendedFields
+        ? payload.transactionTypeCode
+        : buildTransactionTypeCode();
 
     if (isCreditNote) {
         delete requestBody.payments;
